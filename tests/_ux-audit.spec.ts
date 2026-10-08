@@ -94,9 +94,33 @@ test("UX audit: capture the full round-1 experience", async ({ page }) => {
   await startWaveBtn.click();
   await page.getByText(/Round 1 is underway/i).waitFor({ state: "visible" });
 
+  // Phase 2.9: capture the wave counter text at each sample so we
+  // can confirm the HUD actually tracks live enemy count (the
+  // previous version of this read engineRef.current.enemies.length
+  // directly and was stuck at 0 / 6).
+  const waveReadings: string[] = [];
   for (const ms of [400, 1200, 2500, 4500, 7500, 12000, 20000]) {
     await page.waitForTimeout(ms - (ms > 400 ? 400 : 0));
     await page.screenshot({ path: `${DIR}/F-wave-t${ms}.png` });
+    const waveText = await page
+      .locator(".hud-subrow span", { hasText: /Wave / })
+      .first()
+      .textContent()
+      .catch(() => "(no wave text)");
+    waveReadings.push(`t${ms}ms=${waveText?.trim() ?? "?"}`);
+  }
+  console.log("Wave counter readings:", waveReadings.join(", "));
+  // Sanity: at some point in the wave, the counter should read
+  // something other than "0 / 6". If it's stuck at 0 / 6 the
+  // liveEnemyCount mirror is broken.
+  const sawNonZero = waveReadings.some((r) => {
+    const m = r.match(/Wave\s+(\d+)\s*\/\s*(\d+)/);
+    return m ? Number(m[1]) > 0 : false;
+  });
+  if (!sawNonZero) {
+    throw new Error(
+      `Wave counter never showed a non-zero alive count. Readings: ${waveReadings.join(", ")}`
+    );
   }
 
   // F. Inspect the tower (click on it) to see the inspector

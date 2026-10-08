@@ -253,6 +253,26 @@ export function App() {
     block.scrollIntoView({ behavior: reduceMotion ? "auto" : "smooth", block: "center" });
   }, [inspectTower]);
 
+  // Phase 2.9 UX: the wave counter used to read
+  // engineRef.current.enemies.length directly, which is a ref
+  // value and does NOT trigger React re-renders — so the HUD
+  // would show "WAVE 0 / 6" while 5 enemies were on screen
+  // (frozen at the value when setPhase("combat") fired). Mirror
+  // the live count into a state at 5 Hz so the HUD tracks the
+  // wave. The 200 ms cadence keeps the re-render cost well
+  // below the per-frame Three.js work.
+  const [liveEnemyCount, setLiveEnemyCount] = useState(0);
+  useEffect(() => {
+    if (phase !== "combat") {
+      setLiveEnemyCount(0);
+      return undefined;
+    }
+    const id = setInterval(() => {
+      setLiveEnemyCount(engineRef.current.enemies.length);
+    }, 200);
+    return () => clearInterval(id);
+  }, [phase]);
+
   // Phase 2.6 (BGM): the looping background pad. Driven by
   // settings.music + phase. Stops in settings / victory / defeat
   // so the SFX cues and the round-complete sheet read clean.
@@ -1336,10 +1356,13 @@ export function App() {
                 {phase === "combat" ? (
                   // Phase 2.9: live wave progress — how many enemies
                   // remain out of the total this round. The total
-                  // includes every spawn across every group.
+                  // includes every spawn across every group. Reads
+                  // from the liveEnemyCount state (5 Hz mirror of the
+                  // engine) so the HUD actually updates as enemies
+                  // die or escape.
                   <span>
                     Wave {currentRound
-                      ? `${Math.max(0, engineRef.current.enemies.length)} / ${currentRound.spawns.reduce((s, g) => s + g.count, 0)}`
+                      ? `${Math.max(0, liveEnemyCount)} / ${currentRound.spawns.reduce((s, g) => s + g.count, 0)}`
                       : ""}
                   </span>
                 ) : (
