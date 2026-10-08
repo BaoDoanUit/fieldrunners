@@ -3,7 +3,56 @@
    See /DESIGN.md for the full design rationale, palette and type rationale.
    =========================================================================== */
 
-@import url("https://fonts.googleapis.com/css2?family=Bungee+SC&family=Spectral:ital,wght@0,300;0,400;0,500;0,600;1,400&family=JetBrains+Mono:wght@400;500;700&display=swap");
+/* Self-hosted fonts (offline-first iOS PWA path; see src/fonts/LICENSES.md). */
+@font-face {
+  font-family: "Bungee";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("./fonts/bungee-400.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Spectral";
+  font-style: normal;
+  font-weight: 300;
+  font-display: swap;
+  src: url("./fonts/spectral-300.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Spectral";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("./fonts/spectral-400.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Spectral";
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url("./fonts/spectral-500.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Spectral";
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url("./fonts/spectral-600.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Spectral";
+  font-style: italic;
+  font-weight: 400;
+  font-display: swap;
+  src: url("./fonts/spectral-400-italic.woff2") format("woff2");
+}
+@font-face {
+  font-family: "JetBrains Mono";
+  font-style: normal;
+  font-weight: 400 700; /* variable font: 400/500/700 share the same file */
+  font-display: optional;
+  src: url("./fonts/jetbrainsmono-400.woff2") format("woff2");
+}
 
 /* ---------------------------------------------------------------------------
    Tokens
@@ -32,7 +81,7 @@
   --path-line: #6a4f33; /* enemy path on overview */
 
   /* Type families */
-  --font-display: "Bungee SC", "Bebas Neue", Impact, sans-serif;
+  --font-display: "Bungee", "Bebas Neue", Impact, sans-serif;
   --font-body: "Spectral", "Iowan Old Style", "Charter", Georgia, serif;
   --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
 
@@ -697,6 +746,196 @@ button.primary {
 .leaderboard li:nth-child(2) { background: var(--parchment-2); }
 .leaderboard li .rank { font-family: var(--font-display); color: var(--ink); }
 .leaderboard li .score { font-weight: 700; }
+
+/* ---------------------------------------------------------------------------
+   Loading sheet
+   --------------------------------------------------------------------------- */
+.loading-sheet {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: grid;
+  place-items: center;
+  background: var(--parchment);
+  animation: sheet-fade-in 180ms ease-out;
+}
+.loading-sheet.is-leaving {
+  animation: sheet-fade-out 280ms ease-in forwards;
+}
+@keyframes sheet-fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+@keyframes sheet-fade-out {
+  from { transform: translateY(0);     opacity: 1; }
+  to   { transform: translateY(-12px); opacity: 0; }
+}
+.loading-sheet__card {
+  position: relative;
+  width: min(320px, 84vw);
+  padding: 22px 18px 18px;
+  background: var(--parchment);
+  border: var(--hair) solid var(--ink);
+  border-radius: var(--radius-card);
+  box-shadow:
+    0 1px 0 var(--ink) inset,
+    0 0 0 4px var(--parchment) inset,
+    0 0 0 5px var(--ink) inset,
+    0 8px 22px rgba(20, 32, 46, 0.25);
+  text-align: center;
+}
+.loading-sheet__card .stamp {
+  display: inline-block;
+  font-family: var(--font-mono);
+  font-size: var(--t-xxs);
+  text-transform: uppercase;
+  letter-spacing: 0.24em;
+  color: var(--ink);
+  border: var(--hair) solid var(--ink);
+  padding: 3px 8px;
+  margin-bottom: 14px;
+  background: var(--parchment-2);
+}
+.loading-sheet__title {
+  font-family: var(--font-display);
+  font-size: var(--t-xl);
+  letter-spacing: 0.05em;
+  margin: 0 0 14px;
+}
+.loading-sheet__dots {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  justify-content: center;
+}
+.loading-sheet__dots span {
+  width: 6px;
+  height: 6px;
+  background: var(--flare);
+  border-radius: 999px;
+  animation: loading-blink 1.2s infinite;
+}
+.loading-sheet__dots span:nth-child(2) { animation-delay: 0.2s; }
+.loading-sheet__dots span:nth-child(3) { animation-delay: 0.4s; }
+@keyframes loading-blink {
+  0%, 100% { opacity: 0.3; transform: scale(0.85); }
+  50%      { opacity: 1;   transform: scale(1.1); }
+}
+
+/* ---------------------------------------------------------------------------
+   Home menu
+   --------------------------------------------------------------------------- */
+.home-menu {
+  min-height: 100vh;
+  padding:
+    max(env(safe-area-inset-top), 24px)
+    16px
+    max(env(safe-area-inset-bottom), 24px);
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  max-width: 540px;
+  margin: 0 auto;
+  background: var(--parchment);
+}
+.home-menu__header {
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding-top: 12px;
+}
+.home-menu__stamp {
+  display: inline-block;
+  font-family: var(--font-mono);
+  font-size: var(--t-xxs);
+  text-transform: uppercase;
+  letter-spacing: 0.24em;
+  color: var(--ink);
+  border: var(--hair) solid var(--ink);
+  padding: 3px 8px;
+  background: var(--parchment-2);
+}
+.home-menu__title {
+  font-family: var(--font-display);
+  font-size: clamp(2rem, 7vw, 2.6rem);
+  letter-spacing: 0.04em;
+  margin: 4px 0 0;
+  line-height: 1;
+}
+.home-menu__subtitle {
+  font-family: var(--font-body);
+  font-size: var(--t-sm);
+  font-style: italic;
+  color: var(--ink-2);
+  margin: 0;
+  max-width: 32ch;
+}
+.home-menu__plate {
+  flex: 1 1 auto;
+  display: grid;
+  place-items: stretch;
+  border: var(--hair) solid var(--ink);
+  border-radius: var(--radius-card);
+  background: var(--parchment-2);
+  padding: 8px;
+  min-height: 200px;
+  position: relative;
+}
+.home-menu__plate .map-plate { width: 100%; height: 100%; }
+.home-menu__actions {
+  display: grid;
+  gap: 10px;
+}
+.home-menu__actions .action-primary {
+  font-size: var(--t-lg);
+  padding: 14px 16px;
+}
+.home-menu__actions .link {
+  background: transparent;
+  border: 0;
+  color: var(--ink);
+  text-decoration: underline;
+  text-underline-offset: 4px;
+  text-transform: none;
+  letter-spacing: 0;
+  font-family: var(--font-body);
+  font-style: italic;
+  padding: 8px;
+}
+.home-menu__footer {
+  display: flex;
+  align-items: baseline;
+  justify-content: center;
+  gap: 6px;
+  font-family: var(--font-mono);
+  font-size: var(--t-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  color: var(--muted);
+  padding-top: 6px;
+  border-top: var(--hair) solid var(--rule);
+}
+.home-menu__footer strong {
+  color: var(--ink);
+  font-weight: 500;
+  font-family: var(--font-mono);
+}
+.home-menu__footer .folio { margin-left: auto; }
+.home-menu__footer .dot { color: var(--rule); }
+
+button.is-pressed { transform: translate(1px, 1px); }
+
+/* ---------------------------------------------------------------------------
+   Map plate (SVG wrapper)
+   --------------------------------------------------------------------------- */
+.map-plate {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+.map-plate text { font-family: var(--font-display); }
 
 /* ---------------------------------------------------------------------------
    Reduced motion

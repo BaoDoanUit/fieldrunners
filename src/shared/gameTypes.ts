@@ -50,7 +50,7 @@ export interface ProjectileInstance {
   done: boolean;
 }
 
-export type BattlePhase = "menu" | "tutorial" | "building" | "combat" | "victory" | "defeat";
+export type BattlePhase = "menu" | "tutorial" | "building" | "combat" | "victory" | "defeat" | "settings" | "roundCleared" | "paused";
 
 export interface TelemetryEvent {
   name: string;

@@ -3,6 +3,10 @@ import { io, Socket } from "socket.io-client";
 import { gameConfig, getEnemyConfig, getTowerConfig, type EnemyKind, type TowerConfig, type TowerKind } from "../shared/gameConfig";
 import type { BattlePhase, EnemyInstance, ProjectileInstance, SavedProgress, TelemetryEvent, TowerInstance } from "../shared/gameTypes";
 import * as THREE from "three";
+import { Sfx } from "../audio/Sfx";
+import { CardstockSheet } from "./CardstockSheet";
+import { HomeMenu } from "./HomeMenu";
+import { MapPlate } from "./MapPlate";
 
 const STORAGE_KEY = "fieldrunner-defense-save-v1";
 const defaultSave: SavedProgress = {
@@ -308,6 +312,7 @@ export function App() {
       setSelectedTower(null);
       setMessage(`${selectedTower.name} placed. Tap Start Wave when ready.`);
       pushTelemetry("tower_placed", { kind: selectedTower.kind });
+      Sfx.play("place-tower");
       if (progress.settings.haptics) navigator.vibrate?.(10);
     }
   }
@@ -335,6 +340,7 @@ export function App() {
     setInspectTower(engineRef.current.getTower(towerId));
     setMessage("Tower upgraded.");
     pushTelemetry("tower_upgraded", { towerId });
+    Sfx.play("ink-press");
   }
 
   function sellTower(towerId: string) {
@@ -345,6 +351,7 @@ export function App() {
     setInspectTower(null);
     setMessage("Tower sold.");
     pushTelemetry("tower_sold", { towerId });
+    Sfx.play("ink-press");
   }
 
   function spawnDebugEnemy(kind: EnemyKind) {
@@ -374,6 +381,7 @@ export function App() {
         setMessage(`Round ${activeRound} cleared. Buy more defense or start the next wave.`);
         setCurrency((value) => value + gameConfig.rounds[roundIndex].reward);
         nextRound();
+        Sfx.play("round-cleared");
       }
     }
     if (lives + result.livesDelta <= 0) handleDefeat();
@@ -456,6 +464,47 @@ export function App() {
   }
 
   const boardMessage = phase === "tutorial" ? "Tutorial active: learn placement, upgrades, and wave flow." : message;
+
+  // Home menu takes over the full screen — hide the rest of the chrome
+  // so the manual metaphor is uninterrupted.
+  if (phase === "menu") {
+    return (
+      <HomeMenu
+        bestScore={progress.bestScore}
+        unlockedRound={progress.unlockedRound}
+        tutorialComplete={progress.tutorialComplete}
+        onBegin={() => beginRun(1)}
+        onContinue={() => beginRun(progress.unlockedRound)}
+        onHowToPlay={startTutorial}
+        onSettings={() => setPhase("settings")}
+      />
+    );
+  }
+
+  // Settings screen (Phase 1: minimal placeholder; full screen ships in Phase 3)
+  if (phase === "settings") {
+    return (
+      <CardstockSheet
+        title="Settings"
+        stamp="Preferences"
+        folio="P. 11 / 13"
+        onClose={() => setPhase("menu")}
+        actions={[
+          { label: "Done", onClick: () => setPhase("menu"), primary: true }
+        ]}
+      >
+        <p>
+          Settings (music, SFX, haptics, reduced motion) ship in
+          <strong> Phase 3</strong>. The static map and the home menu
+          are now wired and audible; the in-game settings panel will
+          toggle them live without a reload.
+        </p>
+        <p className="detail-card muted" style={{ marginTop: "8px" }}>
+          Current audio state: {Sfx.isMuted() ? "muted" : "live"}.
+        </p>
+      </CardstockSheet>
+    );
+  }
 
   return (
     <div className="app-shell">
@@ -655,28 +704,19 @@ function Overlay(props: {
   folio?: string;
   actions: { label: string; onClick: () => void; primary?: boolean }[];
 }) {
+  // Thin shim kept for backwards compatibility with existing call sites
+  // (Tutorial, Victory, Defeat). New code should import CardstockSheet
+  // directly from "./CardstockSheet" so it can add children, multiple
+  // paragraphs, and a dismissible close affordance.
   return (
-    <div className="overlay">
-      <div className="overlay-card" role="dialog" aria-modal="true">
-        <span className="corner-tr" aria-hidden />
-        <span className="corner-bl" aria-hidden />
-        <span className="stamp">Field Manual · {props.stamp ?? "Briefing"}</span>
-        <h2>{props.title}</h2>
-        <p>{props.body}</p>
-        <div className="button-grid">
-          {props.actions.map((action) => (
-            <button
-              key={action.label}
-              className={action.primary ? "primary" : ""}
-              onClick={action.onClick}
-            >
-              {action.label}
-            </button>
-          ))}
-        </div>
-        <span className="folio">{props.folio ?? "P. 03 / 13"}</span>
-      </div>
-    </div>
+    <CardstockSheet
+      title={props.title}
+      stamp={props.stamp ?? "Briefing"}
+      folio={props.folio ?? "P. 03 / 13"}
+      actions={props.actions}
+    >
+      <p>{props.body}</p>
+    </CardstockSheet>
   );
 }
 
