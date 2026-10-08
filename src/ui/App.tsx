@@ -180,6 +180,13 @@ export function App() {
   // rebind VFX to a fresh engine.
   const engineVfxOffRef = useRef<(() => void) | null>(null);
   const pausedRef = useRef(false);
+  // Phase 2.9: refs into the right rail so we can auto-scroll the
+  // Inspector into view when the player clicks a placed tower.
+  // Without this, the panel content can be tall enough that the
+  // Inspector lives below the fold and the click "does nothing"
+  // from the player's perspective.
+  const sidePanelRef = useRef<HTMLElement | null>(null);
+  const inspectorBlockRef = useRef<HTMLElement | null>(null);
 
   const currentRound = gameConfig.rounds[roundIndex];
   const unlockedRound = progress.unlockedRound;
@@ -231,6 +238,20 @@ export function App() {
   useEffect(() => {
     pausedRef.current = paused;
   }, [paused]);
+
+  // Phase 2.9 UX: when a tower is inspected, the player needs to
+  // see the Inspector panel. With six panels in the right rail,
+  // it can sit below the fold — auto-scroll it into view on
+  // selection. Smooth behavior, not a jump.
+  useEffect(() => {
+    if (!inspectTower) return;
+    const block = inspectorBlockRef.current;
+    if (!block) return;
+    const reduceMotion =
+      typeof window !== "undefined" &&
+      window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+    block.scrollIntoView({ behavior: reduceMotion ? "auto" : "smooth", block: "center" });
+  }, [inspectTower]);
 
   // Phase 2.6 (BGM): the looping background pad. Driven by
   // settings.music + phase. Stops in settings / victory / defeat
@@ -1329,7 +1350,7 @@ export function App() {
           </div>
         </section>
 
-        <aside className="panel">
+        <aside className="panel" ref={sidePanelRef}>
           <section className="panel-block">
             <div className="panel-title">Actions</div>
             <div className="button-grid">
@@ -1387,7 +1408,7 @@ export function App() {
             )}
           </section>
 
-          <section className="panel-block">
+          <section className="panel-block" ref={inspectorBlockRef} data-inspector="true">
             <div className="panel-title">Inspector</div>
             {inspectTower ? (
               <div className="detail-card">

@@ -61,11 +61,23 @@ test("UX audit: capture the full round-1 experience", async ({ page }) => {
   );
   console.log("Canvas cursor (tower hovered):", hoverCursor);
   await page.mouse.click(t.x, t.y);
-  await page.waitForTimeout(400);
+  await page.waitForTimeout(800);  // let the auto-scroll settle
   const inspectorText = await page.locator(".panel-block", { hasText: "Inspector" })
     .innerText()
     .catch(() => "");
   console.log("Inspector text after click:", inspectorText.replace(/\s+/g, " ").slice(0, 120));
+  // Phase 2.9: the inspector block must actually be visible — not
+  // below the fold. Use a viewport-relative check via
+  // element.boundingBox() and the viewport size.
+  const inspectorVisible = await page
+    .locator(".panel-block[data-inspector='true']")
+    .evaluate((el) => {
+      const r = (el as HTMLElement).getBoundingClientRect();
+      const inView = r.top >= 0 && r.bottom <= window.innerHeight && r.height > 0;
+      return { inView, top: Math.round(r.top), bottom: Math.round(r.bottom), viewportH: window.innerHeight };
+    })
+    .catch(() => ({ inView: false, top: 0, bottom: 0, viewportH: 0 }));
+  console.log("Inspector viewport-fit:", JSON.stringify(inspectorVisible));
   await page.screenshot({ path: `${DIR}/D2-tower-inspected.png` });
   // Close the inspector so the next screenshot shows a clean canvas
   const closeBtn = page.getByRole("button", { name: /Close/i });
