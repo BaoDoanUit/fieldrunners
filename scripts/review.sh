@@ -133,6 +133,61 @@ else
   note "$TODOS markers in source (review separately)"
 fi
 
+# ---------- infrastructure (webapp topology) ----------
+hdr "infrastructure"
+# Engine + audio must be browser-only: no Node imports in src/.
+if grep -rq "from ['\"]node:" src 2>/dev/null; then
+  fail "src/ contains node: imports — engine is leaking server code"
+  FAILS=$((FAILS + 1))
+else
+  ok "src/ is browser-only (no node: imports)"
+fi
+# Server must only import shared types/config, never gameplay code.
+LEAKED=$(grep -rh "from ['\"]\.\./src/" server 2>/dev/null | grep -E "engine|audio|ui" | wc -l)
+if [ "$LEAKED" -gt 0 ]; then
+  fail "server/ imports gameplay code ($LEAKED leaks)"
+  FAILS=$((FAILS + 1))
+else
+  ok "server/ only imports from src/shared (config + types)"
+fi
+# PWA: manifest, SW, icons must be in place.
+if [ -f public/manifest.webmanifest ]; then
+  if node -e "
+    import('node:fs/promises').then(async ({readFile}) => {
+      const m = JSON.parse(await readFile('./public/manifest.webmanifest', 'utf8'));
+      if (!m.name || !m.icons || !m.start_url) process.exit(1);
+    }).catch(() => process.exit(1));
+  " 2>/dev/null; then
+    ok "manifest.webmanifest is valid and has name/icons/start_url"
+  else
+    fail "manifest.webmanifest is missing required fields"
+    FAILS=$((FAILS + 1))
+  fi
+else
+  fail "public/manifest.webmanifest missing"
+  FAILS=$((FAILS + 1))
+fi
+if [ -f public/sw.js ] && grep -q "CACHE_NAME\|addEventListener" public/sw.js; then
+  ok "sw.js exists and registers fetch handlers"
+else
+  fail "public/sw.js missing or empty"
+  FAILS=$((FAILS + 1))
+fi
+ICON_COUNT=$(ls public/icons/*.png 2>/dev/null | wc -l)
+if [ "$ICON_COUNT" -ge 2 ]; then
+  ok "icons/ has $ICON_COUNT PNG files"
+else
+  fail "icons/ has only $ICON_COUNT PNG files (expected ≥ 2)"
+  FAILS=$((FAILS + 1))
+fi
+# index.html must reference the SW + manifest + apple-touch-icon.
+if grep -q "manifest.webmanifest" index.html && grep -q "serviceWorker.register" index.html; then
+  ok "index.html wires manifest + service worker"
+else
+  fail "index.html is missing PWA wiring"
+  FAILS=$((FAILS + 1))
+fi
+
 # ---------- AGENTS.md drift ----------
 hdr "AGENTS.md drift"
 DRIFTED=0
