@@ -253,8 +253,12 @@ export function App() {
     scene.background = new THREE.Color("#08101d");
     scene.fog = new THREE.Fog("#08101d", 18, 38);
 
-    const camera = new THREE.PerspectiveCamera(40, (initialW || 1) / (initialH || 1), 0.1, 100);
-    camera.position.set(0, 17, 16);
+    // Phase 2.7 layout: pull the camera up and closer so the
+    // playfield reads as a top-down map rather than a low-angle
+    // diorama. FOV widens slightly to keep the full 22×20 playfield
+    // in frame at the new aspect ratio.
+    const camera = new THREE.PerspectiveCamera(46, (initialW || 1) / (initialH || 1), 0.1, 100);
+    camera.position.set(0, 22, 13);
     camera.lookAt(0, 0, 0);
 
     const ambient = new THREE.AmbientLight(0xffffff, 1.4);
@@ -288,26 +292,61 @@ export function App() {
 
     const ground = new THREE.Mesh(
       new THREE.PlaneGeometry(22, 20),
-      new THREE.MeshStandardMaterial({ color: "#102036", roughness: 1 })
+      new THREE.MeshStandardMaterial({ color: "#0c1a2e", roughness: 1 })
     );
     ground.rotation.x = -Math.PI / 2;
     // Phase 2.5: ground receives tower shadows.
     ground.receiveShadow = true;
     map.add(ground);
 
-    const pathMaterial = new THREE.MeshStandardMaterial({ color: "#2d415f", roughness: 1 });
+    // Phase 2.7 layout: the path used to be 2.1 units wide and color
+    // #2d415f — it looked like big dark slabs, dominated the view,
+    // and overlapped with the build zones. Narrowing it to 1.2 and
+    // lightening the color makes the path read as a road rather
+    // than a wall, and the chevrons give it direction.
+    const PATH_WIDTH = 1.2;
+    const pathMaterial = new THREE.MeshStandardMaterial({ color: "#4a6a8a", roughness: 1 });
+    const chevronMaterial = new THREE.MeshBasicMaterial({
+      color: "#7da4cc",
+      transparent: true,
+      opacity: 0.55,
+      side: THREE.DoubleSide
+    });
     const pathPoints = gameConfig.path.map((point) => new THREE.Vector3(point.x, 0.02, point.z));
+    // Build a small chevron (▷) shape once and reuse it per segment.
+    const chevronShape = new THREE.Shape();
+    chevronShape.moveTo(-0.18, 0.22);
+    chevronShape.lineTo(0.22, 0);
+    chevronShape.lineTo(-0.18, -0.22);
+    chevronShape.lineTo(-0.08, 0);
+    chevronShape.closePath();
+    const chevronGeometry = new THREE.ShapeGeometry(chevronShape);
     for (let i = 0; i < pathPoints.length - 1; i += 1) {
       const a = pathPoints[i];
       const b = pathPoints[i + 1];
       const length = a.distanceTo(b);
+      // Road segment — a flat strip along the path direction.
       const segment = new THREE.Mesh(
-        new THREE.BoxGeometry(2.1, 0.05, length + 0.2),
+        new THREE.BoxGeometry(PATH_WIDTH, 0.05, length + 0.2),
         pathMaterial
       );
       segment.position.set((a.x + b.x) / 2, 0.03, (a.z + b.z) / 2);
       segment.rotation.y = Math.atan2(b.x - a.x, b.z - a.z);
       map.add(segment);
+
+      // Directional chevrons — drop one every ~1.2 units along the
+      // segment, rotated to point along the path.
+      const dir = new THREE.Vector3(b.x - a.x, 0, b.z - a.z).normalize();
+      const yaw = Math.atan2(dir.x, dir.z);
+      const spacing = 1.2;
+      const count = Math.max(1, Math.floor(length / spacing));
+      for (let c = 1; c <= count; c += 1) {
+        const t = c / (count + 1);
+        const chevron = new THREE.Mesh(chevronGeometry, chevronMaterial);
+        chevron.position.set(a.x + dir.x * length * t, 0.06, a.z + dir.z * length * t);
+        chevron.rotation.set(-Math.PI / 2, 0, -yaw);
+        map.add(chevron);
+      }
     }
 
     gameConfig.buildZones.forEach((zone) => {
