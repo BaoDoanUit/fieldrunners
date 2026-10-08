@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { io, Socket } from "socket.io-client";
-import { gameConfig, getEnemyConfig, getTowerConfig, type EnemyKind, type TowerConfig } from "../shared/gameConfig";
+import { gameConfig, getEnemyConfig, getTowerConfig, type EnemyKind, type TowerConfig, type TowerKind } from "../shared/gameConfig";
 import type { BattlePhase, EnemyInstance, ProjectileInstance, SavedProgress, TelemetryEvent, TowerInstance } from "../shared/gameTypes";
 import * as THREE from "three";
 
@@ -543,10 +543,14 @@ export function App() {
                       setMessage(`${tower.name}: ${tower.description}`);
                     }}
                   >
-                    <strong>{tower.name}</strong>
-                    <span>Cost {tower.cost}</span>
-                    <span>Sell {Math.round(tower.cost * tower.sellMultiplier)}</span>
-                    <small>{tower.description}</small>
+                    <span className="glyph" aria-hidden>
+                      <TowerSilhouette kind={tower.kind} />
+                    </span>
+                    <span className="name">{tower.name}</span>
+                    <span className="meta">
+                      <span className="cost">¤{tower.cost}</span>
+                      <span>↻ {Math.round(tower.cost * tower.sellMultiplier)}</span>
+                    </span>
                   </button>
                 );
               })}
@@ -627,9 +631,9 @@ export function App() {
         </aside>
       </main>
 
-      {phase === "victory" && <Overlay title="Victory" body="You cleared Round 20. Replay or start a new run to improve score." actions={[{ label: "Restart", onClick: () => beginRun(1) }, { label: "Continue", onClick: () => beginRun(progress.unlockedRound) }]} />}
-      {phase === "defeat" && <Overlay title="Defeat" body="Enemies reached the endpoint. Retry immediately and refine tower placement." actions={[{ label: "Retry", onClick: () => beginRun(activeRound) }, { label: "Home", onClick: () => setPhase("menu") }]} />}
-      {phase === "tutorial" && <Overlay title="Tutorial" body="Tap a tower card, place it on a valid zone, then start the wave. Towers can be upgraded and sold during the run." actions={[{ label: "Finish Tutorial", onClick: completeTutorial }, { label: "Skip", onClick: skipTutorial }]} />}
+      {phase === "victory" && <Overlay stamp="Order 20 · Complete" folio="P. 13 / 13" title="Victory" body="You cleared Round 20. Replay or start a new run to improve score." actions={[{ label: "Restart Round 1", onClick: () => beginRun(1), primary: true }, { label: "Continue Run", onClick: () => beginRun(progress.unlockedRound) }]} />}
+      {phase === "defeat" && <Overlay stamp={`Order ${activeRound} · Failed`} folio={`P. ${String(Math.min(activeRound, 13)).padStart(2, "0")} / 13`} title="Defeat" body="Enemies reached the endpoint. Retry immediately and refine tower placement." actions={[{ label: `Retry Round ${activeRound}`, onClick: () => beginRun(activeRound), primary: true }, { label: "Home", onClick: () => setPhase("menu") }]} />}
+      {phase === "tutorial" && <Overlay stamp="Briefing 00" folio="P. 00 / 13" title="Tutorial" body="Tap a tower card, place it on a valid zone, then start the wave. Towers can be upgraded and sold during the run." actions={[{ label: "Finish Tutorial", onClick: completeTutorial, primary: true }, { label: "Skip", onClick: skipTutorial }]} />}
 
       {debugMode && (
         <div className="debug-strip">
@@ -644,22 +648,84 @@ export function App() {
   );
 }
 
-function Overlay(props: { title: string; body: string; actions: { label: string; onClick: () => void }[] }) {
+function Overlay(props: {
+  title: string;
+  body: string;
+  stamp?: string;
+  folio?: string;
+  actions: { label: string; onClick: () => void; primary?: boolean }[];
+}) {
   return (
     <div className="overlay">
-      <div className="overlay-card">
+      <div className="overlay-card" role="dialog" aria-modal="true">
+        <span className="corner-tr" aria-hidden />
+        <span className="corner-bl" aria-hidden />
+        <span className="stamp">Field Manual · {props.stamp ?? "Briefing"}</span>
         <h2>{props.title}</h2>
         <p>{props.body}</p>
         <div className="button-grid">
           {props.actions.map((action) => (
-            <button key={action.label} onClick={action.onClick}>
+            <button
+              key={action.label}
+              className={action.primary ? "primary" : ""}
+              onClick={action.onClick}
+            >
               {action.label}
             </button>
           ))}
         </div>
+        <span className="folio">{props.folio ?? "P. 03 / 13"}</span>
       </div>
     </div>
   );
+}
+
+/**
+ * Printed top-down silhouette of a tower's coverage area.
+ * Drawn in the same shape the in-game range preview uses, so the card
+ * is honest: tap a card, you see exactly the printed silhouette.
+ */
+function TowerSilhouette(props: { kind: TowerKind }) {
+  // 32x32 viewBox; range shapes drawn as ink lines on parchment.
+  switch (props.kind) {
+    case "cannon":
+      return (
+        <svg viewBox="0 0 32 32" fill="none" aria-hidden>
+          {/* cannon = one sharp burst, concentric rings */}
+          <circle cx="16" cy="16" r="13" className="sil-cannon" />
+          <circle cx="16" cy="16" r="7"  className="sil-cannon" />
+          <path d="M16 3 L18 6 L14 6 Z" className="sil-cannon" fill="currentColor" />
+        </svg>
+      );
+    case "rapid":
+      return (
+        <svg viewBox="0 0 32 32" fill="none" aria-hidden>
+          {/* rapid = dashed rings + tick marks (small, fast) */}
+          <circle cx="16" cy="16" r="13" className="sil-rapid" />
+          <circle cx="16" cy="16" r="8"  className="sil-rapid" />
+          <path d="M16 2 L16 5 M16 27 L16 30 M2 16 L5 16 M27 16 L30 16"
+                stroke="currentColor" strokeWidth="1.5" />
+        </svg>
+      );
+    case "splash":
+      return (
+        <svg viewBox="0 0 32 32" fill="none" aria-hidden>
+          {/* splash = three filled dots, like blast marks */}
+          <circle cx="16" cy="16" r="13" className="sil-splash" />
+          <circle cx="16" cy="16" r="6"  className="sil-splash" />
+          <circle cx="16" cy="16" r="2"  fill="currentColor" />
+        </svg>
+      );
+    case "slow":
+      return (
+        <svg viewBox="0 0 32 32" fill="none" aria-hidden>
+          {/* slow = dotted ring + arc (a current) */}
+          <circle cx="16" cy="16" r="13" className="sil-slow" />
+          <path d="M3 16 a13 13 0 0 1 26 0" stroke="currentColor"
+                strokeWidth="1.5" fill="none" />
+        </svg>
+      );
+  }
 }
 
 function createEngine() {

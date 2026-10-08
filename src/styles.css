@@ -1,292 +1,720 @@
+/* ===========================================================================
+   FieldRunner — "Tactical Field Manual" theme
+   See /DESIGN.md for the full design rationale, palette and type rationale.
+   =========================================================================== */
+
+@import url("https://fonts.googleapis.com/css2?family=Bungee+SC&family=Spectral:ital,wght@0,300;0,400;0,500;0,600;1,400&family=JetBrains+Mono:wght@400;500;700&display=swap");
+
+/* ---------------------------------------------------------------------------
+   Tokens
+   --------------------------------------------------------------------------- */
 :root {
-  color-scheme: dark;
-  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  --bg: #050b16;
-  --panel: rgba(10, 18, 33, 0.84);
-  --panel-border: rgba(148, 163, 184, 0.18);
-  --text: #e5eefb;
-  --muted: #9fb0ca;
-  --accent: #7dd3fc;
-  --accent-2: #f59e0b;
-  --good: #22c55e;
-  --bad: #ef4444;
+  color-scheme: light;
+
+  /* Paper & ink */
+  --parchment: #f2ebdc;
+  --parchment-2: #e8dfca;
+  --ink: #14202e;
+  --ink-2: #2a3a52;
+  --muted: #6b6553;
+  --rule: #1d2a3a;
+
+  /* Dark chrome (battle HUD, topbar) */
+  --topo: #0e1b2c;
+  --topo-2: #14223a;
+  --topo-rule: #2c3e5c;
+
+  /* Accent system */
+  --flare: #e15a1c;     /* CTA, range, fire */
+  --flare-2: #f4a13a;   /* hover, highlight */
+  --verdigris: #2c7a6a; /* valid, currency, "go" */
+  --rust: #8e2b12;      /* damage, invalid */
+  --path-line: #6a4f33; /* enemy path on overview */
+
+  /* Type families */
+  --font-display: "Bungee SC", "Bebas Neue", Impact, sans-serif;
+  --font-body: "Spectral", "Iowan Old Style", "Charter", Georgia, serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
+
+  /* Type scale (4px rhythm) */
+  --t-xxs: 0.625rem;   /* 10 — folio, debug */
+  --t-xs:  0.75rem;    /* 12 — eyebrows, mono labels */
+  --t-sm:  0.875rem;   /* 14 — body small */
+  --t-md:  1rem;       /* 16 — body */
+  --t-lg:  1.25rem;    /* 20 — section titles */
+  --t-xl:  1.5rem;     /* 24 — screen titles */
+  --t-2xl: 2rem;       /* 32 — "ROUND 03" headlines */
+  --t-3xl: 2.5rem;     /* 40 — victory */
+
+  /* Spacing (4px base) */
+  --s-1: 4px;
+  --s-2: 8px;
+  --s-3: 12px;
+  --s-4: 16px;
+  --s-5: 20px;
+  --s-6: 24px;
+  --s-8: 32px;
+  --s-10: 40px;
+
+  /* Hairline borders */
+  --hair: 1px;
+  --hair-thick: 2px;
+  --radius-card: 6px;        /* manual page corner */
+  --radius-soft: 12px;       /* pill / chip */
 }
 
-* {
-  box-sizing: border-box;
-}
+/* ---------------------------------------------------------------------------
+   Reset & page
+   --------------------------------------------------------------------------- */
+* { box-sizing: border-box; }
 
-html,
-body,
-#root {
+html, body, #root {
   width: 100%;
   min-height: 100%;
   margin: 0;
 }
 
 body {
+  /* Subtle paper grain — pure CSS, no asset. */
   background:
-    radial-gradient(circle at top, rgba(40, 66, 107, 0.36), transparent 34%),
-    radial-gradient(circle at 20% 20%, rgba(60, 130, 246, 0.18), transparent 22%),
-    linear-gradient(180deg, #07101f 0%, #040813 100%);
-  color: var(--text);
+    radial-gradient(circle at 22% 18%, rgba(241, 224, 188, 0.55) 0, transparent 42%),
+    radial-gradient(circle at 80% 8%, rgba(225, 200, 156, 0.42) 0, transparent 38%),
+    radial-gradient(circle at 50% 100%, rgba(110, 90, 50, 0.18) 0, transparent 50%),
+    var(--parchment);
+  color: var(--ink);
+  font-family: var(--font-body);
+  font-size: var(--t-md);
+  line-height: 1.45;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
 }
 
-button {
-  border: 0;
-  border-radius: 16px;
-  padding: 0.8rem 1rem;
-  color: var(--text);
-  background: linear-gradient(180deg, rgba(30, 41, 59, 0.95), rgba(15, 23, 42, 0.95));
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.06);
-  cursor: pointer;
-}
+button, input, select, textarea { font: inherit; color: inherit; }
 
-button:disabled {
-  opacity: 0.45;
-  cursor: not-allowed;
-}
-
+/* ---------------------------------------------------------------------------
+   App shell — vertical on mobile, side-by-side on wide
+   --------------------------------------------------------------------------- */
 .app-shell {
   min-height: 100vh;
-  padding: env(safe-area-inset-top) 14px env(safe-area-inset-bottom);
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
+  padding:
+    max(env(safe-area-inset-top), var(--s-4))
+    var(--s-3)
+    max(env(safe-area-inset-bottom), var(--s-4));
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  gap: var(--s-3);
+  max-width: 1280px;
+  margin: 0 auto;
 }
 
+/* ---------------------------------------------------------------------------
+   Topbar (HUD) — battle-mode chrome
+   --------------------------------------------------------------------------- */
 .topbar {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  gap: 12px;
-  padding: 12px 4px 4px;
+  gap: var(--s-3);
+  padding: var(--s-2) var(--s-3);
+  background: var(--topo);
+  color: var(--parchment);
+  border: var(--hair) solid var(--topo-rule);
+  border-radius: var(--radius-soft);
+  position: relative;
 }
 
+/* Manual corner-brackets framing the HUD bar. */
+.topbar::before, .topbar::after {
+  content: "";
+  position: absolute;
+  top: 4px; bottom: 4px;
+  width: 8px;
+  border: var(--hair) solid var(--flare);
+  pointer-events: none;
+}
+.topbar::before { left: 4px;  border-right: 0; }
+.topbar::after  { right: 4px; border-left:  0; }
+
 .eyebrow {
-  color: var(--accent);
+  font-family: var(--font-mono);
+  font-size: var(--t-xs);
   text-transform: uppercase;
-  letter-spacing: 0.16em;
-  font-size: 0.72rem;
+  letter-spacing: 0.22em;
+  color: var(--flare-2);
+  font-weight: 500;
 }
 
 .topbar h1 {
-  margin: 4px 0 0;
-  font-size: clamp(1.2rem, 2vw, 2rem);
-  line-height: 1.1;
+  margin: 2px 0 0;
+  font-family: var(--font-display);
+  font-size: var(--t-lg);
+  letter-spacing: 0.05em;
+  line-height: 1;
+  color: var(--parchment);
 }
 
+/* Status pill — "Server online" / "Offline fallback" */
 .status-pill {
-  padding: 0.55rem 0.85rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
   border-radius: 999px;
-  font-size: 0.85rem;
+  font-family: var(--font-mono);
+  font-size: var(--t-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  font-weight: 500;
   white-space: nowrap;
+  background: transparent;
+  color: var(--ink);
+  border: var(--hair) solid currentColor;
 }
-
-.status-pill.online {
-  background: rgba(34, 197, 94, 0.16);
-  color: #8ef0b0;
+.status-pill::before {
+  content: "";
+  width: 6px; height: 6px;
+  border-radius: 999px;
+  background: currentColor;
 }
+.status-pill.online  { color: var(--verdigris); }
+.status-pill.offline { color: var(--rust); }
 
-.status-pill.offline {
-  background: rgba(239, 68, 68, 0.16);
-  color: #ffb4b4;
-}
-
+/* ---------------------------------------------------------------------------
+   Layout
+   --------------------------------------------------------------------------- */
 .layout {
   display: grid;
-  grid-template-columns: minmax(0, 1.5fr) minmax(320px, 0.75fr);
-  gap: 12px;
-  flex: 1;
-}
-
-.stage-card,
-.panel,
-.panel-block,
-.overlay-card {
-  background: var(--panel);
-  border: 1px solid var(--panel-border);
-  border-radius: 24px;
-  backdrop-filter: blur(18px);
-}
-
-.stage-card {
-  overflow: hidden;
+  grid-template-columns: 1fr;
+  grid-template-rows: minmax(280px, 1fr) auto;
+  gap: var(--s-3);
   min-height: 0;
+}
+@media (min-width: 1100px) {
+  .layout {
+    grid-template-columns: minmax(0, 1.7fr) minmax(320px, 0.9fr);
+    grid-template-rows: 1fr;
+  }
+}
+
+/* ---------------------------------------------------------------------------
+   Stage — the 3D battlefield
+   --------------------------------------------------------------------------- */
+.stage-card {
+  position: relative;
+  background: var(--topo);
+  border: var(--hair) solid var(--ink);
+  border-radius: var(--radius-card);
+  overflow: hidden;
+  min-height: 56vh;
+  /* Mechanical drafting frame */
+  outline: var(--hair) solid var(--topo-rule);
+  outline-offset: 6px;
 }
 
 .stage-frame {
   position: relative;
-  min-height: 74vh;
+  width: 100%;
+  height: 100%;
+  min-height: 56vh;
 }
 
 .stage-canvas {
   width: 100%;
   height: 100%;
-  min-height: 74vh;
   display: block;
   touch-action: manipulation;
+  background:
+    repeating-linear-gradient(0deg, transparent 0 31px, rgba(244, 161, 58, 0.05) 31px 32px),
+    repeating-linear-gradient(90deg, transparent 0 31px, rgba(244, 161, 58, 0.05) 31px 32px),
+    linear-gradient(180deg, #0a1424 0%, #050a13 100%);
 }
 
+/* HUD overlay inside the stage */
 .hud-overlay {
   position: absolute;
-  left: 12px;
-  right: 12px;
-  top: 12px;
+  left: 0; right: 0; top: 0;
+  padding: var(--s-3);
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: var(--s-2);
   pointer-events: none;
 }
-
-.hud-row,
-.hud-subrow {
+.hud-row, .hud-subrow {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
-  font-size: 0.86rem;
+  gap: var(--s-2);
+  font-family: var(--font-mono);
+  font-size: var(--t-sm);
+  color: var(--parchment);
 }
-
-.hud-row span,
-.hud-subrow span {
-  padding: 0.45rem 0.65rem;
-  border-radius: 999px;
-  background: rgba(15, 23, 42, 0.64);
+.hud-row span, .hud-subrow span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  background: rgba(14, 27, 44, 0.78);
+  border: var(--hair) solid rgba(244, 161, 58, 0.45);
+  border-radius: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  font-size: var(--t-xs);
+}
+.hud-row span strong, .hud-subrow span strong {
+  font-family: var(--font-display);
+  font-weight: 400;
+  letter-spacing: 0.08em;
+  color: var(--flare-2);
 }
 
 .hud-message {
-  padding: 0.8rem 0.95rem;
-  border-radius: 18px;
-  background: rgba(2, 6, 23, 0.72);
-  font-size: 0.95rem;
+  font-family: var(--font-body);
+  font-size: var(--t-sm);
+  font-style: italic;
+  color: var(--parchment);
+  background: rgba(14, 27, 44, 0.82);
+  border-left: 3px solid var(--flare);
+  padding: 8px 12px;
+  border-radius: 0 4px 4px 0;
+  max-width: 70%;
+  align-self: flex-start;
 }
 
+/* ---------------------------------------------------------------------------
+   Side panel — the bottom sheet (mobile) or right column (desktop)
+   --------------------------------------------------------------------------- */
 .panel {
   display: flex;
   flex-direction: column;
-  gap: 12px;
-  padding: 12px;
+  gap: var(--s-3);
+  padding: var(--s-3);
   min-height: 0;
   overflow: auto;
+  background: var(--parchment);
+  border: var(--hair) solid var(--ink);
+  border-radius: var(--radius-card);
+  position: relative;
+}
+
+/* Tiny folio in the top-right of the panel — "P.03" — printed manual wink. */
+.panel::before {
+  content: "P.\A 03";
+  white-space: pre;
+  position: absolute;
+  top: 6px;
+  right: 8px;
+  font-family: var(--font-mono);
+  font-size: var(--t-xxs);
+  color: var(--muted);
+  letter-spacing: 0.1em;
+  line-height: 1.05;
+  text-align: right;
 }
 
 .panel-block {
-  padding: 12px;
+  padding: var(--s-3) 0;
+  border-top: var(--hair) solid var(--rule);
 }
+.panel-block:first-child { border-top: 0; padding-top: 0; }
 
 .panel-title {
-  font-size: 0.8rem;
-  letter-spacing: 0.12em;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin: 0 0 var(--s-2);
+  font-family: var(--font-mono);
+  font-size: var(--t-xs);
   text-transform: uppercase;
+  letter-spacing: 0.18em;
+  color: var(--ink);
+  font-weight: 500;
+}
+.panel-title::after {
+  content: "";
+  flex: 1;
+  height: var(--hair);
+  background: var(--rule);
+  opacity: 0.4;
+  transform: translateY(-3px);
+}
+
+/* ---------------------------------------------------------------------------
+   Buttons — printer's ink-press
+   --------------------------------------------------------------------------- */
+button {
+  font-family: var(--font-mono);
+  font-size: var(--t-sm);
+  font-weight: 500;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--ink);
+  background: var(--parchment-2);
+  border: var(--hair) solid var(--ink);
+  border-radius: 4px;
+  padding: 10px 14px;
+  cursor: pointer;
+  transition: transform 80ms ease-out, background 120ms ease-out, color 120ms ease-out;
+  position: relative;
+}
+button:hover:not(:disabled) {
+  background: var(--ink);
+  color: var(--parchment);
+}
+button:active:not(:disabled) {
+  transform: translate(1px, 1px);
+}
+button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  background: transparent;
+  border-style: dashed;
   color: var(--muted);
-  margin-bottom: 10px;
+}
+
+/* Primary CTA — use the flare accent */
+.button-grid > button.primary,
+button.primary {
+  background: var(--flare);
+  color: var(--parchment);
+  border-color: var(--ink);
+}
+.button-grid > button.primary:hover:not(:disabled) {
+  background: var(--ink);
+  color: var(--flare-2);
 }
 
 .button-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--s-2);
+}
+.button-grid.compact { grid-template-columns: repeat(3, 1fr); }
+
+@media (max-width: 700px) {
+  .button-grid,
+  .button-grid.compact { grid-template-columns: 1fr 1fr; }
 }
 
-.button-grid.compact {
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-}
-
+/* ---------------------------------------------------------------------------
+   Tower cards — the signature element
+   Each card has a printed top-down silhouette of that tower's coverage
+   --------------------------------------------------------------------------- */
 .tower-list {
   display: grid;
-  gap: 10px;
+  grid-template-columns: repeat(2, 1fr);
+  gap: var(--s-2);
 }
 
 .tower-card {
+  position: relative;
   display: grid;
-  gap: 0.3rem;
+  grid-template-columns: 44px 1fr;
+  grid-template-rows: auto auto auto;
+  align-items: center;
+  gap: 2px 10px;
+  padding: 8px 10px 8px 8px;
+  background: var(--parchment);
+  border: var(--hair) solid var(--ink);
+  border-radius: 4px;
   text-align: left;
+  font: inherit;
+  text-transform: none;
+  letter-spacing: 0;
+  color: var(--ink);
+  cursor: pointer;
+  transition: transform 80ms ease-out, background 120ms ease-out;
+  isolation: isolate;
 }
-
+.tower-card:hover:not(:disabled) { background: var(--parchment-2); }
+.tower-card:active:not(:disabled) { transform: translate(1px, 1px); }
 .tower-card.active {
-  outline: 2px solid var(--accent);
+  background: var(--ink);
+  color: var(--parchment);
+  border-color: var(--flare);
+  box-shadow: 0 0 0 2px var(--flare-2) inset;
 }
 
+/* Glyph cell — 44×44 with the printed silhouette */
+.tower-card .glyph {
+  grid-row: 1 / span 3;
+  width: 44px; height: 44px;
+  display: grid; place-items: center;
+  background: var(--parchment-2);
+  border: var(--hair) solid var(--ink);
+  border-radius: 2px;
+  position: relative;
+}
+.tower-card.active .glyph { background: var(--topo-2); border-color: var(--flare-2); }
+.tower-card .glyph svg { width: 32px; height: 32px; color: var(--ink); }
+.tower-card.active .glyph svg { color: var(--flare-2); }
+
+/* Per-tower silhouette styles (used in inline SVG via class on path) */
+.sil-cannon  { stroke: currentColor; stroke-width: 1.5; fill: none; }
+.sil-cannon::before { content: ""; } /* (kept for future pseudo) */
+.sil-rapid   { stroke: currentColor; stroke-width: 1.5; fill: none; stroke-dasharray: 2 2; }
+.sil-splash  { fill: currentColor; opacity: 0.45; }
+.sil-slow    { fill: none; stroke: currentColor; stroke-width: 1.5; stroke-dasharray: 1 2; }
+
+.tower-card .name {
+  font-family: var(--font-display);
+  font-size: var(--t-sm);
+  letter-spacing: 0.06em;
+  line-height: 1;
+  align-self: end;
+}
+.tower-card .meta {
+  grid-column: 2;
+  font-family: var(--font-mono);
+  font-size: var(--t-xxs);
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--muted);
+  display: flex; gap: 10px;
+}
+.tower-card.active .meta { color: var(--parchment-2); }
+.tower-card .meta .cost { color: var(--verdigris); }
+.tower-card.active .meta .cost { color: var(--flare-2); }
+
+/* ---------------------------------------------------------------------------
+   Detail / inspector cards
+   --------------------------------------------------------------------------- */
 .detail-card {
   display: grid;
-  gap: 0.45rem;
+  gap: 6px;
+  font-size: var(--t-sm);
 }
-
-.detail-card p {
-  margin: 0;
-  color: var(--text);
-}
-
+.detail-card p { margin: 0; }
 .detail-card.muted,
 .helper {
   color: var(--muted);
+  font-size: var(--t-sm);
+  font-style: italic;
 }
 
+/* Stat row used in the inspector */
+.stat-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: baseline;
+  font-family: var(--font-mono);
+  font-size: var(--t-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  padding: 4px 0;
+  border-bottom: var(--hair) dashed var(--rule);
+}
+.stat-row .label { color: var(--muted); }
+.stat-row .value { color: var(--ink); font-weight: 500; }
+
+/* ---------------------------------------------------------------------------
+   Telemetry
+   --------------------------------------------------------------------------- */
 .telemetry-list {
   display: grid;
-  gap: 0.45rem;
-  color: var(--muted);
-  font-size: 0.92rem;
+  gap: 4px;
+  font-family: var(--font-mono);
+  font-size: var(--t-xs);
+  color: var(--ink-2);
+  max-height: 180px;
+  overflow: auto;
+  background: var(--parchment-2);
+  padding: 8px;
+  border: var(--hair) solid var(--ink);
+  border-radius: 4px;
 }
+.telemetry-list .event {
+  display: flex; justify-content: space-between; gap: 8px;
+  border-bottom: var(--hair) dotted var(--rule);
+  padding: 2px 0;
+}
+.telemetry-list .event:last-child { border-bottom: 0; }
+.telemetry-list .event .ts { color: var(--muted); }
 
+/* ---------------------------------------------------------------------------
+   Overlay — the cardstock sheet (signature element)
+   --------------------------------------------------------------------------- */
 .overlay {
   position: fixed;
   inset: 0;
-  background: rgba(2, 6, 23, 0.72);
+  background:
+    radial-gradient(ellipse at 50% 30%, rgba(20, 32, 46, 0.4) 0%, rgba(20, 32, 46, 0.78) 80%);
   display: grid;
   place-items: center;
-  padding: 16px;
+  padding: var(--s-4);
+  z-index: 50;
+  animation: overlay-fade 180ms ease-out;
+}
+
+@keyframes overlay-fade {
+  from { opacity: 0; }
+  to   { opacity: 1; }
 }
 
 .overlay-card {
-  width: min(520px, 100%);
-  padding: 20px;
+  position: relative;
+  width: min(440px, 100%);
+  padding: 28px 22px 22px;
+  background: var(--parchment);
+  color: var(--ink);
+  border: var(--hair) solid var(--ink);
+  border-radius: var(--radius-card);
+  /* Inner double-rule — printed plate feel */
+  box-shadow:
+    0 1px 0 var(--ink) inset,
+    0 0 0 4px var(--parchment) inset,
+    0 0 0 5px var(--ink) inset,
+    0 12px 28px rgba(20, 32, 46, 0.35),
+    0 2px 0 rgba(20, 32, 46, 0.12);
+  animation: sheet-rise 280ms cubic-bezier(0.2, 0.7, 0.2, 1);
+  transform-origin: 50% 100%;
+}
+@keyframes sheet-rise {
+  from { transform: translateY(8px) rotate(-0.6deg); opacity: 0; }
+  to   { transform: translateY(0)    rotate(0);     opacity: 1; }
 }
 
+/* Corner brackets — four mechanical drafting marks */
+.overlay-card::before,
+.overlay-card::after,
+.overlay-card > .brackets,
+.overlay-card .bracket-tl,
+.overlay-card .bracket-br {
+  /* Use pseudo-elements for TL/BR. */
+}
+.overlay-card::before,
+.overlay-card::after {
+  content: "";
+  position: absolute;
+  width: 10px; height: 10px;
+  border: var(--hair-thick) solid var(--flare);
+  pointer-events: none;
+}
+.overlay-card::before { top: 6px;    left: 6px;    border-right: 0; border-bottom: 0; }
+.overlay-card::after  { bottom: 6px; right: 6px;   border-left: 0;  border-top: 0; }
+/* TL/BR get a smaller accent corner to balance */
+.overlay-card .corner-tr,
+.overlay-card .corner-bl {
+  position: absolute;
+  width: 6px; height: 6px;
+  border: var(--hair) solid var(--ink);
+  pointer-events: none;
+}
+.overlay-card .corner-tr { top: 10px;    right: 10px;    border-left: 0;  border-bottom: 0; }
+.overlay-card .corner-bl { bottom: 10px; left: 10px;     border-right: 0; border-top: 0; }
+
+.overlay-card .stamp {
+  display: inline-block;
+  font-family: var(--font-mono);
+  font-size: var(--t-xxs);
+  text-transform: uppercase;
+  letter-spacing: 0.24em;
+  color: var(--ink);
+  border: var(--hair) solid var(--ink);
+  padding: 3px 8px;
+  margin-bottom: 14px;
+  background: var(--parchment-2);
+}
 .overlay-card h2 {
-  margin-top: 0;
+  font-family: var(--font-display);
+  font-size: var(--t-2xl);
+  letter-spacing: 0.04em;
+  margin: 0 0 10px;
+  line-height: 1;
+}
+.overlay-card p {
+  font-size: var(--t-md);
+  margin: 0 0 18px;
+  color: var(--ink-2);
+}
+.overlay-card .folio {
+  position: absolute;
+  bottom: 8px;
+  right: 14px;
+  font-family: var(--font-mono);
+  font-size: var(--t-xxs);
+  letter-spacing: 0.1em;
+  color: var(--muted);
 }
 
+/* Inside overlays, the button grid is full-width and stacked */
+.overlay-card .button-grid { grid-template-columns: 1fr; gap: 8px; margin-top: 4px; }
+.overlay-card .button-grid button { padding: 12px 16px; font-size: var(--t-md); }
+
+/* ---------------------------------------------------------------------------
+   Debug strip — the field-survey note pinned to the bottom
+   --------------------------------------------------------------------------- */
 .debug-strip {
   position: fixed;
-  left: 12px;
-  right: 12px;
-  bottom: 12px;
+  left: var(--s-3);
+  right: var(--s-3);
+  bottom: var(--s-3);
   display: flex;
-  gap: 10px;
+  gap: var(--s-2);
   flex-wrap: wrap;
-  padding: 10px 12px;
-  border-radius: 16px;
-  background: rgba(15, 23, 42, 0.85);
-  border: 1px solid rgba(148, 163, 184, 0.22);
-  color: var(--muted);
-  font-size: 0.8rem;
+  padding: 8px 12px;
+  background: var(--topo);
+  color: var(--parchment-2);
+  border: var(--hair) solid var(--flare);
+  border-radius: 4px;
+  font-family: var(--font-mono);
+  font-size: var(--t-xs);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  z-index: 30;
+}
+.debug-strip button {
+  padding: 4px 8px;
+  font-size: var(--t-xxs);
+  background: var(--topo-2);
+  color: var(--parchment);
+  border: var(--hair) solid var(--parchment-2);
+}
+.debug-strip button:hover:not(:disabled) { background: var(--flare); color: var(--ink); }
+
+/* ---------------------------------------------------------------------------
+   Leaderboard / score list
+   --------------------------------------------------------------------------- */
+.leaderboard {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 2px;
+  font-family: var(--font-mono);
+  font-size: var(--t-xs);
+}
+.leaderboard li {
+  display: grid;
+  grid-template-columns: 28px 1fr auto;
+  gap: 10px;
+  padding: 4px 8px;
+  background: var(--parchment-2);
+  border: var(--hair) solid var(--ink);
+  border-radius: 2px;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+}
+.leaderboard li:nth-child(1) { background: var(--flare-2); color: var(--ink); }
+.leaderboard li:nth-child(2) { background: var(--parchment-2); }
+.leaderboard li .rank { font-family: var(--font-display); color: var(--ink); }
+.leaderboard li .score { font-weight: 700; }
+
+/* ---------------------------------------------------------------------------
+   Reduced motion
+   --------------------------------------------------------------------------- */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    transition-duration: 0.001ms !important;
+  }
 }
 
-@media (max-width: 1100px) {
-  .layout {
-    grid-template-columns: 1fr;
-  }
-
-  .stage-frame,
-  .stage-canvas {
-    min-height: 62vh;
-  }
-}
-
-@media (max-width: 700px) {
-  .topbar {
-    align-items: flex-start;
-    flex-direction: column;
-  }
-
-  .button-grid.compact,
-  .button-grid {
-    grid-template-columns: 1fr 1fr;
-  }
-
-  .stage-frame,
-  .stage-canvas {
-    min-height: 52vh;
-  }
+/* ---------------------------------------------------------------------------
+   Wide-screen refinements
+   --------------------------------------------------------------------------- */
+@media (min-width: 1100px) {
+  .topbar h1 { font-size: var(--t-xl); }
+  .stage-card { min-height: 78vh; }
+  .stage-frame, .stage-canvas { min-height: 78vh; }
 }
