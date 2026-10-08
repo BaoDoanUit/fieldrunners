@@ -212,6 +212,11 @@ class SfxImpl {
   private master: GainNode | null = null;
   private _muted = false;
   private _unlocked = false;
+  // Procedural BGM pad. Two sawtooth oscillators at D2/A2 feed a
+  // low-pass filter whose cutoff slowly sweeps, plus a soft noise
+  // bed. The whole thing is generated each call; startBgm creates
+  // a fresh set of nodes, stopBgm ramps them out.
+  private bgmNodes: { osc1: OscillatorNode; osc2: OscillatorNode; noise: AudioBufferSourceNode; filter: BiquadFilterNode; gain: GainNode; lfo: OscillatorNode; lfoGain: GainNode } | null = null;
 
   /** Lazily create the AudioContext. Safe to call repeatedly. */
   private ensureContext(): { ctx: AudioContext; master: GainNode } | null {
@@ -256,10 +261,11 @@ class SfxImpl {
     }
   }
 
-  /** Toggle the master mute. */
+  /** Toggle the master mute. Stops BGM when muted. */
   mute(value: boolean): void {
     this._muted = value;
     if (this.master) this.master.gain.value = value ? 0 : 0.6;
+    if (value) this.stopBgm();
   }
 
   isMuted(): boolean {
@@ -268,6 +274,97 @@ class SfxImpl {
 
   isUnlocked(): boolean {
     return this._unlocked;
+  }
+
+  /**
+   * Start the looping background music. Procedurally generated —
+   * a low pad in D minor (D2 + A2) with a slow filter sweep and
+   * a soft noise bed. Idempotent: calling startBgm() while BGM
+   * is already running is a no-op.
+   */
+  startBgm(): void {
+    if (this.bgmNodes) return;
+    if (this._muted) return;
+    const made = this.ensureContext();
+    if (!made) return;
+    const { ctx } = made;
+    if (ctx.state === "suspended") {
+      void ctx.resume();
+    }
+    try {
+      // Two soft saw oscillators detuned for movement.
+      const osc1 = ctx.createOscillator();
+      osc1.type = "sawtooth";
+      osc1.frequency.value = 73.42; // D2
+      const osc2 = ctx.createOscillator();
+      osc2.type = "sawtooth";
+      osc2.frequency.value = 110.0; // A2
+      osc2.detune.value = -7;
+      // Soft noise bed.
+      const noiseBuf = ctx.createBuffer(1, ctx.sampleRate * 2, ctx.sampleRate);
+      const noiseData = noiseBuf.getChannelData(0);
+      for (let i = 0; i < noiseData.length; i++) noiseData[i] = (Math.random() * 2 - 1) * 0.6;
+      const noise = ctx.createBufferSource();
+      noise.buffer = noiseBuf;
+      noise.loop = true;
+      // Low-pass filter with a slow LFO sweeping the cutoff.
+      const filter = ctx.createBiquadFilter();
+      filter.type = "lowpass";
+      filter.frequency.value = 480;
+      filter.Q.value = 0.6;
+      const lfo = ctx.createOscillator();
+      lfo.type = "sine";
+      lfo.frequency.value = 0.05; // 20 s sweep cycle
+      const lfoGain = ctx.createGain();
+      lfoGain.gain.value = 220; // cutoff modulation depth
+      lfo.connect(lfoGain).connect(filter.frequency);
+      // Master BGM gain with a slow fade-in.
+      const gain = ctx.createGain();
+      gain.gain.value = 0;
+      osc1.connect(filter);
+      osc2.connect(filter);
+      noise.connect(filter);
+      filter.connect(gain).connect(made.master);
+      const now = ctx.currentTime;
+      osc1.start(now);
+      osc2.start(now);
+      noise.start(now);
+      lfo.start(now);
+      gain.gain.setValueAtTime(0, now);
+      gain.gain.linearRampToValueAtTime(0.18, now + 3.0);
+      this.bgmNodes = { osc1, osc2, noise, filter, gain, lfo, lfoGain };
+    } catch (err) {
+      console.warn("[Sfx] startBgm failed:", err);
+    }
+  }
+
+  /** Stop the BGM with a 0.6 s fade-out. Idempotent. */
+  stopBgm(): void {
+    if (!this.bgmNodes) return;
+    const { osc1, osc2, noise, gain, lfo } = this.bgmNodes;
+    const ctx = this.ctx;
+    if (!ctx) {
+      this.bgmNodes = null;
+      return;
+    }
+    const now = ctx.currentTime;
+    try {
+      gain.gain.cancelScheduledValues(now);
+      gain.gain.setValueAtTime(gain.gain.value, now);
+      gain.gain.linearRampToValueAtTime(0, now + 0.6);
+      osc1.stop(now + 0.7);
+      osc2.stop(now + 0.7);
+      noise.stop(now + 0.7);
+      lfo.stop(now + 0.7);
+    } catch {
+      // ignore — some browsers throw on already-stopped nodes
+    }
+    this.bgmNodes = null;
+  }
+
+  /** True if the BGM pad is currently playing. */
+  isBgmPlaying(): boolean {
+    return this.bgmNodes !== null;
   }
 }
 

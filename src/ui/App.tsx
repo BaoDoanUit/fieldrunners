@@ -199,6 +199,26 @@ export function App() {
     pausedRef.current = paused;
   }, [paused]);
 
+  // Phase 2.6 (BGM): the looping background pad. Driven by
+  // settings.music + phase. Stops in settings / victory / defeat
+  // so the SFX cues and the round-complete sheet read clean.
+  useEffect(() => {
+    if (!progress.settings.music) {
+      Sfx.stopBgm();
+      return;
+    }
+    const quiet = new Set<BattlePhase>(["settings", "victory", "defeat"]);
+    if (quiet.has(phase)) {
+      Sfx.stopBgm();
+      return;
+    }
+    Sfx.unlock();
+    Sfx.startBgm();
+    return () => {
+      Sfx.stopBgm();
+    };
+  }, [progress.settings.music, phase]);
+
   useEffect(() => {
     if (!canvasRef.current) return;
     const canvas = canvasRef.current;
