@@ -787,23 +787,124 @@ export function App() {
     engineRef.current.towers.forEach((tower) => {
       const towerConfig = getTowerConfig(tower.kind);
       const level = (tower.level as 1 | 2 | 3);
-      // Phase 2.6 UX: each tower now wears its own type color as an
-      // emissive glow (cannon=orange, rapid=green, splash=blue,
-      // slow=purple) and gets a flat colored ring on the ground under
-      // it, so a freshly placed tower is impossible to miss on the
-      // dark navy playfield.
-      const mesh = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.4, 0.55, 1.1 + (level - 1) * 0.05, 8),
-        new THREE.MeshStandardMaterial({
-          color: TOWER_BODY[level],
-          emissive: towerConfig.color,
-          emissiveIntensity: 0.55
-        })
+      // Phase 2.8: each tower kind now has a recognizable 3D shape
+      // (cannon = barrel on a pedestal, rapid = triple barrels,
+      // splash = wide dome, slow = crystal). Previously every tower
+      // was a plain cylinder, so the playfield looked like a forest
+      // of identical pegs. The emissive glow still uses the tower's
+      // type color so each kind stays visually distinct at a glance.
+      const group = new THREE.Group();
+      group.position.set(tower.x, 0, tower.z);
+
+      const bodyMaterial = new THREE.MeshStandardMaterial({
+        color: TOWER_BODY[level],
+        emissive: towerConfig.color,
+        emissiveIntensity: 0.55,
+        metalness: 0.35,
+        roughness: 0.6
+      });
+      const topMaterial = new THREE.MeshStandardMaterial({
+        color: towerConfig.color,
+        emissive: towerConfig.color,
+        emissiveIntensity: 0.85,
+        metalness: 0.2,
+        roughness: 0.4
+      });
+
+      // Shared pedestal — a short fat cylinder that every tower
+      // sits on. Levels add a small ring to show progression.
+      const pedestalHeight = 0.35 + (level - 1) * 0.05;
+      const pedestal = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.55, 0.65, pedestalHeight, 10),
+        bodyMaterial
       );
-      mesh.position.set(tower.x, 0.55, tower.z);
-      // Phase 2.5: towers cast shadows.
-      mesh.castShadow = true;
-      scene.towerGroup.add(mesh);
+      pedestal.position.y = pedestalHeight / 2;
+      pedestal.castShadow = true;
+      group.add(pedestal);
+
+      // Per-kind turret on top of the pedestal.
+      const turretY = pedestalHeight;
+      if (tower.kind === "cannon") {
+        // Pedestal + one fat horizontal barrel.
+        const barrel = new THREE.Mesh(
+          new THREE.CylinderGeometry(0.18, 0.22, 0.95, 10),
+          topMaterial
+        );
+        barrel.rotation.z = Math.PI / 2;
+        barrel.position.set(0.25, turretY + 0.15, 0);
+        barrel.castShadow = true;
+        group.add(barrel);
+        // A small muzzle ring at the front of the barrel.
+        const muzzle = new THREE.Mesh(
+          new THREE.TorusGeometry(0.22, 0.06, 8, 16),
+          topMaterial
+        );
+        muzzle.rotation.y = Math.PI / 2;
+        muzzle.position.set(0.72, turretY + 0.15, 0);
+        group.add(muzzle);
+      } else if (tower.kind === "rapid") {
+        // Pedestal + three thin barrels in a triangular cluster.
+        const offsets: Array<[number, number]> = [
+          [0.32, 0.0],
+          [-0.18, 0.22],
+          [-0.18, -0.22]
+        ];
+        for (const [ox, oz] of offsets) {
+          const barrel = new THREE.Mesh(
+            new THREE.CylinderGeometry(0.09, 0.11, 0.7, 8),
+            topMaterial
+          );
+          barrel.rotation.z = Math.PI / 2;
+          barrel.position.set(ox + 0.15, turretY + 0.18, oz);
+          barrel.castShadow = true;
+          group.add(barrel);
+        }
+      } else if (tower.kind === "splash") {
+        // Pedestal + a wide dome (half-sphere) on top — reads as a
+        // mortar / howitzer.
+        const dome = new THREE.Mesh(
+          new THREE.SphereGeometry(0.48, 14, 8, 0, Math.PI * 2, 0, Math.PI / 2),
+          topMaterial
+        );
+        dome.position.y = turretY + 0.02;
+        dome.castShadow = true;
+        group.add(dome);
+        // A small ring around the dome's base.
+        const ring = new THREE.Mesh(
+          new THREE.TorusGeometry(0.48, 0.05, 8, 18),
+          bodyMaterial
+        );
+        ring.rotation.x = -Math.PI / 2;
+        ring.position.y = turretY + 0.04;
+        group.add(ring);
+      } else {
+        // "slow" — pedestal + a floating octahedron (crystal).
+        const crystalMat = new THREE.MeshStandardMaterial({
+          color: towerConfig.color,
+          emissive: towerConfig.color,
+          emissiveIntensity: 0.9,
+          metalness: 0.1,
+          roughness: 0.2,
+          transparent: true,
+          opacity: 0.92
+        });
+        const crystal = new THREE.Mesh(
+          new THREE.OctahedronGeometry(0.36, 0),
+          crystalMat
+        );
+        crystal.position.y = turretY + 0.45;
+        crystal.castShadow = true;
+        group.add(crystal);
+        // A smaller crystal floating above the main one.
+        const shard = new THREE.Mesh(
+          new THREE.OctahedronGeometry(0.18, 0),
+          crystalMat
+        );
+        shard.position.y = turretY + 0.9;
+        group.add(shard);
+      }
+
+      scene.towerGroup.add(group);
 
       // Bright base ring lying flat on the ground — a per-tower
       // "stand" that makes placement obvious from any camera angle.
@@ -1224,43 +1325,62 @@ function Overlay(props: {
  * is honest: tap a card, you see exactly the printed silhouette.
  */
 function TowerSilhouette(props: { kind: TowerKind }) {
-  // 32x32 viewBox; range shapes drawn as ink lines on parchment.
+  // 32x32 viewBox. Each silhouette is a small ink illustration of
+  // the 3D tower — a cannon with a barrel, a rapid with three
+  // barrels, a splash with a dome, a slow with a crystal. The card
+  // now reads as a tower catalog, not a range diagram.
   switch (props.kind) {
     case "cannon":
       return (
         <svg viewBox="0 0 32 32" fill="none" aria-hidden>
-          {/* cannon = one sharp burst, concentric rings */}
-          <circle cx="16" cy="16" r="13" className="sil-cannon" />
-          <circle cx="16" cy="16" r="7"  className="sil-cannon" />
-          <path d="M16 3 L18 6 L14 6 Z" className="sil-cannon" fill="currentColor" />
+          {/* Pedestal */}
+          <rect x="9" y="20" width="14" height="7" rx="1.5" className="sil-cannon" fill="currentColor" fillOpacity="0.15" />
+          {/* Horizontal barrel */}
+          <rect x="11" y="12" width="14" height="5" rx="1" className="sil-cannon" fill="currentColor" fillOpacity="0.55" />
+          {/* Muzzle ring */}
+          <circle cx="25" cy="14.5" r="1.6" className="sil-cannon" fill="currentColor" />
+          {/* Breech dot */}
+          <circle cx="11" cy="14.5" r="1.4" className="sil-cannon" fill="currentColor" />
         </svg>
       );
     case "rapid":
       return (
         <svg viewBox="0 0 32 32" fill="none" aria-hidden>
-          {/* rapid = dashed rings + tick marks (small, fast) */}
-          <circle cx="16" cy="16" r="13" className="sil-rapid" />
-          <circle cx="16" cy="16" r="8"  className="sil-rapid" />
-          <path d="M16 2 L16 5 M16 27 L16 30 M2 16 L5 16 M27 16 L30 16"
-                stroke="currentColor" strokeWidth="1.5" />
+          {/* Pedestal */}
+          <rect x="10" y="22" width="12" height="6" rx="1.5" className="sil-rapid" fill="currentColor" fillOpacity="0.15" />
+          {/* Three thin barrels in a triangular cluster */}
+          <rect x="13" y="8"  width="11" height="3" rx="1" className="sil-rapid" fill="currentColor" fillOpacity="0.55" transform="rotate(-12 18.5 9.5)" />
+          <rect x="11" y="14" width="11" height="3" rx="1" className="sil-rapid" fill="currentColor" fillOpacity="0.55" />
+          <rect x="13" y="20" width="11" height="3" rx="1" className="sil-rapid" fill="currentColor" fillOpacity="0.55" transform="rotate(12 18.5 21.5)" />
         </svg>
       );
     case "splash":
       return (
         <svg viewBox="0 0 32 32" fill="none" aria-hidden>
-          {/* splash = three filled dots, like blast marks */}
-          <circle cx="16" cy="16" r="13" className="sil-splash" />
-          <circle cx="16" cy="16" r="6"  className="sil-splash" />
-          <circle cx="16" cy="16" r="2"  fill="currentColor" />
+          {/* Pedestal */}
+          <rect x="9" y="22" width="14" height="6" rx="1.5" className="sil-splash" fill="currentColor" fillOpacity="0.15" />
+          {/* Dome (half-circle) */}
+          <path d="M7 22 a9 9 0 0 1 18 0 Z" className="sil-splash" fill="currentColor" fillOpacity="0.55" />
+          {/* Ring around the dome's base */}
+          <ellipse cx="16" cy="22" rx="9" ry="1.5" className="sil-splash" />
+          {/* Faint blast dots around the dome */}
+          <circle cx="4"  cy="14" r="1" className="sil-splash" fillOpacity="0.4" />
+          <circle cx="28" cy="14" r="1" className="sil-splash" fillOpacity="0.4" />
+          <circle cx="16" cy="6"  r="1" className="sil-splash" fillOpacity="0.4" />
         </svg>
       );
     case "slow":
       return (
         <svg viewBox="0 0 32 32" fill="none" aria-hidden>
-          {/* slow = dotted ring + arc (a current) */}
-          <circle cx="16" cy="16" r="13" className="sil-slow" />
-          <path d="M3 16 a13 13 0 0 1 26 0" stroke="currentColor"
-                strokeWidth="1.5" fill="none" />
+          {/* Pedestal */}
+          <rect x="10" y="22" width="12" height="6" rx="1.5" className="sil-slow" fill="currentColor" fillOpacity="0.15" />
+          {/* Main crystal (octahedron silhouette) */}
+          <path d="M16 6 L22 14 L16 22 L10 14 Z" className="sil-slow" fill="currentColor" fillOpacity="0.55" />
+          {/* Small floating shard above */}
+          <path d="M22 4 L24 6 L22 8 L20 6 Z" className="sil-slow" fill="currentColor" fillOpacity="0.8" />
+          {/* Faint motion arcs around the crystal */}
+          <path d="M3 16 a13 13 0 0 1 6 -8"  stroke="currentColor" strokeWidth="1" fill="none" strokeOpacity="0.35" />
+          <path d="M29 16 a13 13 0 0 0 -6 -8" stroke="currentColor" strokeWidth="1" fill="none" strokeOpacity="0.35" />
         </svg>
       );
   }
