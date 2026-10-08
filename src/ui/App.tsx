@@ -1072,6 +1072,18 @@ export function App() {
       if (inspectTower?.id === tower.id) {
         const range = towerConfig.upgrades[level - 1].range;
         const ring = new THREE.Mesh(
+          // TODO(Phase 2.9): the inspected-tower range ring
+          // rendering is being investigated. The original
+          // dark-navy (cInk) cylinder at y=0.05 was below
+          // the path top (y=0.055) and effectively clipped;
+          // subsequent attempts (CylinderGeometry at y=0.5,
+          // RingGeometry at y=0.2) created the ring meshes
+          // without errors but the ring never appears in
+          // screenshots. Suspected stale-closure on inspectTower
+          // inside the canvas-init useEffect's tick function
+          // (deps are [canvasEl, reducedMotion]). For now,
+          // restore the original dim ring so behavior is at
+          // least unchanged.
           new THREE.CylinderGeometry(range, range, 0.02, 32, 1, true),
           new THREE.MeshBasicMaterial({ color: cInk, transparent: true, opacity: 0.18, side: THREE.DoubleSide })
         );
