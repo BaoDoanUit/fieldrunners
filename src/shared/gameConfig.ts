@@ -43,9 +43,30 @@ export interface RoundSpawn {
 export interface RoundConfig {
   round: number;
   reward: number;
+  /** Short field-manual line shown when the round begins. */
+  briefing: string;
   livesBonus?: number;
   boss?: boolean;
   spawns: RoundSpawn[];
+}
+
+/**
+ * Top-level tunables. Mirrored on the client and the server.
+ * Adjusting these is the single canonical way to change game-wide
+ * pacing without hunting magic numbers in App.tsx.
+ */
+export interface TuningConfig {
+  startingLives: number;
+  startingCurrency: number;
+  /** Cap on how many enemies can leak before the run is lost. */
+  maxLives: number;
+  maxUpgradeLevel: number;
+  /** Multiplier applied to the boss's base HP (round-20 boss uses 1.5). */
+  bossHpMultiplier: number;
+  /** Currency awarded per confirmed kill is enemy.reward * this. */
+  killRewardMultiplier: number;
+  /** Hard cap on the running score that a single run can post. */
+  scoreCap: number;
 }
 
 export interface GameConfig {
@@ -54,6 +75,84 @@ export interface GameConfig {
   towers: TowerConfig[];
   enemies: EnemyConfig[];
   rounds: RoundConfig[];
+  tuning: TuningConfig;
+}
+
+/** Hand-tuned milestone rounds. The other 15 still use the auto-generator. */
+const MILESTONE_OVERRIDES: Record<number, Omit<RoundConfig, "round">> = {
+  1: {
+    reward: 50,
+    briefing: "Opening move. A handful of recruits — establish the perimeter and learn the towers.",
+    spawns: [
+      { enemy: "basic", count: 6, spacing: 0.85 }
+    ]
+  },
+  5: {
+    reward: 78,
+    briefing: "Order 05 — first checkpoint. Mixed infantry and armor press the eastern bend.",
+    spawns: [
+      { enemy: "basic", count: 11, spacing: 0.7 },
+      { enemy: "fast", count: 4, spacing: 0.55 },
+      { enemy: "heavy", count: 2, spacing: 1.1, bonusHp: 25 }
+    ]
+  },
+  10: {
+    reward: 140,
+    livesBonus: 2,
+    boss: true,
+    briefing: "Order 10 — a commander enters the field. Heavy armor escorts the boss; soften the pack first.",
+    spawns: [
+      { enemy: "basic", count: 14, spacing: 0.65 },
+      { enemy: "fast", count: 5, spacing: 0.5, bonusSpeed: 0.05 },
+      { enemy: "heavy", count: 3, spacing: 0.9, bonusHp: 35 },
+      { enemy: "boss", count: 1, spacing: 0, bonusHp: 0, bonusSpeed: 0 }
+    ]
+  },
+  15: {
+    reward: 180,
+    briefing: "Order 15 — a second front. Mixed swarms and heavies arrive together; area damage pays.",
+    spawns: [
+      { enemy: "basic", count: 18, spacing: 0.55 },
+      { enemy: "fast", count: 9, spacing: 0.42, bonusSpeed: 0.08 },
+      { enemy: "heavy", count: 5, spacing: 0.85, bonusHp: 45 },
+      { enemy: "swarm", count: 12, spacing: 0.28 }
+    ]
+  },
+  20: {
+    reward: 260,
+    livesBonus: 3,
+    boss: true,
+    briefing: "Order 20 — final stand. The general leads the horde. Hold to the last zone.",
+    spawns: [
+      { enemy: "basic", count: 22, spacing: 0.5 },
+      { enemy: "fast", count: 12, spacing: 0.38, bonusSpeed: 0.12 },
+      { enemy: "heavy", count: 8, spacing: 0.8, bonusHp: 80 },
+      { enemy: "swarm", count: 18, spacing: 0.24 },
+      { enemy: "boss", count: 1, spacing: 0, bonusHp: 450, bonusSpeed: 0.15 }
+    ]
+  }
+};
+
+/** Auto-generated fallback for non-milestone rounds. */
+function autoRound(index: number): Omit<RoundConfig, "round"> {
+  const round = index + 1;
+  const reward = 40 + round * 4;
+  const spawns: RoundSpawn[] = [];
+  if (round % 10 === 0 && round !== 10 && round !== 20) {
+    spawns.push({ enemy: "boss", count: 1, spacing: 0, bonusHp: round * 25, bonusSpeed: 0.05 });
+  }
+  spawns.push({ enemy: "basic", count: 6 + round, spacing: 0.7 });
+  if (round >= 3) spawns.push({ enemy: "fast", count: 2 + Math.floor(round / 2), spacing: 0.55, bonusSpeed: round >= 12 ? 0.12 : 0 });
+  if (round >= 5) spawns.push({ enemy: "heavy", count: 1 + Math.floor(round / 4), spacing: 0.9, bonusHp: round * 6 });
+  if (round >= 7) spawns.push({ enemy: "swarm", count: 5 + round, spacing: 0.32 });
+  if (round % 5 === 0 && round !== 10 && round !== 20) {
+    spawns.push({ enemy: "heavy", count: 2 + Math.floor(round / 5), spacing: 0.8, bonusHp: 30 });
+  }
+  return {
+    reward,
+    briefing: `Order ${round}. Hold the line.`,
+    spawns
+  };
 }
 
 export const gameConfig: GameConfig = {
@@ -148,25 +247,19 @@ export const gameConfig: GameConfig = {
   ],
   rounds: Array.from({ length: 20 }, (_, index) => {
     const round = index + 1;
-    const reward = 40 + round * 4;
-    const spawns: RoundSpawn[] = [];
-
-    if (round === 10 || round === 20) {
-      spawns.push({ enemy: "boss", count: 1, spacing: 0, bonusHp: round === 20 ? 450 : 0, bonusSpeed: round === 20 ? 0.15 : 0 });
-    }
-
-    spawns.push({ enemy: "basic", count: 6 + round, spacing: 0.7 });
-
-    if (round >= 3) spawns.push({ enemy: "fast", count: 2 + Math.floor(round / 2), spacing: 0.55, bonusSpeed: round >= 12 ? 0.12 : 0 });
-    if (round >= 5) spawns.push({ enemy: "heavy", count: 1 + Math.floor(round / 4), spacing: 0.9, bonusHp: round * 6 });
-    if (round >= 7) spawns.push({ enemy: "swarm", count: 5 + round, spacing: 0.32 });
-
-    if (round % 5 === 0 && round !== 10 && round !== 20) {
-      spawns.push({ enemy: "heavy", count: 2 + Math.floor(round / 5), spacing: 0.8, bonusHp: 30 });
-    }
-
-    return { round, reward, spawns };
-  })
+    const override = MILESTONE_OVERRIDES[round];
+    const base = override ?? autoRound(index);
+    return { round, ...base };
+  }),
+  tuning: {
+    startingLives: 20,
+    startingCurrency: 120,
+    maxLives: 30,
+    maxUpgradeLevel: 3,
+    bossHpMultiplier: 1.0,
+    killRewardMultiplier: 1.0,
+    scoreCap: 1_000_000
+  }
 };
 
 export const getTowerConfig = (kind: TowerKind) => gameConfig.towers.find((tower) => tower.kind === kind)!;

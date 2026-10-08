@@ -1004,6 +1004,83 @@ button.is-pressed { transform: translate(1px, 1px); }
 .install-hint__close:hover { background: var(--parchment-2); }
 
 /* ---------------------------------------------------------------------------
+   Settings (toggles, danger zone)
+   --------------------------------------------------------------------------- */
+.settings-grid {
+  display: grid;
+  gap: 8px;
+  margin: 12px 0;
+}
+.toggle-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 6px 12px;
+  padding: 8px 10px;
+  border: var(--hair) solid var(--rule);
+  border-radius: 4px;
+  background: var(--parchment);
+  cursor: pointer;
+}
+.toggle-row__label {
+  font-family: var(--font-display);
+  font-size: var(--t-sm);
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+.toggle-row__desc {
+  grid-column: 1 / -1;
+  font-family: var(--font-body);
+  font-size: var(--t-xs);
+  color: var(--muted);
+  font-style: italic;
+}
+.toggle {
+  position: relative;
+  display: inline-block;
+  width: 38px;
+  height: 22px;
+  background: var(--parchment-2);
+  border: var(--hair) solid var(--ink);
+  border-radius: 999px;
+  transition: background 120ms ease-out;
+}
+.toggle input {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  cursor: pointer;
+  margin: 0;
+}
+.toggle__thumb {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  background: var(--ink);
+  border-radius: 999px;
+  transition: transform 120ms ease-out;
+}
+.toggle.is-on { background: var(--flare); }
+.toggle.is-on .toggle__thumb { transform: translateX(16px); background: var(--parchment); }
+.settings-danger {
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: var(--hair) solid var(--rule);
+}
+.settings-danger .eyebrow {
+  display: block;
+  margin-bottom: 6px;
+  color: var(--rust);
+}
+.settings-danger button {
+  border-color: var(--rust);
+  color: var(--rust);
+}
+.settings-danger button:hover { background: var(--rust); color: var(--parchment); }
+
+/* ---------------------------------------------------------------------------
    Reduced motion
    --------------------------------------------------------------------------- */
 @media (prefers-reduced-motion: reduce) {
@@ -1013,6 +1090,19 @@ button.is-pressed { transform: translate(1px, 1px); }
     animation-duration: 0.001ms !important;
     transition-duration: 0.001ms !important;
   }
+}
+
+/* In-app toggle (Phase 3.10). Mirrors the OS setting. Toggled by
+   <html class="reduced-motion"> from App.tsx so the same rules fire
+   even when the OS preference isn't set. */
+html.reduced-motion,
+html.reduced-motion *,
+html.reduced-motion *::before,
+html.reduced-motion *::after {
+  animation-duration: 0.001ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.001ms !important;
+  scroll-behavior: auto !important;
 }
 
 /* ---------------------------------------------------------------------------

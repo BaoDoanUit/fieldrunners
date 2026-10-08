@@ -150,9 +150,13 @@ export class Engine {
     const idx = this.towers.findIndex((t) => t.id === id);
     if (idx === -1) return { ok: false, value: 0 };
     const tower = this.towers[idx];
+    // The base cost + every upgrade tier the player has paid for.
+    // upgrades[i] is the entry that takes the tower from level (i) to
+    // (i+1). The tower starts at L1 (no upgrades[0] cost), so we
+    // slice(1, level) to sum what was actually spent.
     const invested =
       tower.config.cost +
-      tower.config.upgrades.slice(0, tower.level - 1).reduce((s, u) => s + u.cost, 0);
+      tower.config.upgrades.slice(1, tower.level).reduce((s, u) => s + u.cost, 0);
     const value = Math.round(invested * tower.config.sellMultiplier);
     this.towers.splice(idx, 1);
     return { ok: true, value };

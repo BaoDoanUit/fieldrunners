@@ -4,15 +4,33 @@ import type { EnemyInstance, TowerInstance } from "../shared/gameTypes";
  * Targeting — pick which enemy a tower fires at.
  *
  * The PRD says "Towers acquire targets based on default targeting rules."
- * We provide four strategies; the engine's per-tower default is wired in
+ * We provide five strategies; the engine's per-tower default is wired in
  * `Engine.ts`:
  *
  *   cannon  -> strongest
  *   rapid   -> first        (along the path)
  *   splash  -> densest      (most enemies within splashRadius)
  *   slow    -> first
+ *
+ * The tower's effective range comes from the *current* upgrade level
+ * (`tower.config.upgrades[tower.level - 1].range`), not a top-level
+ * field — `TowerConfig` doesn't carry a flat `range`.
  */
 export type TargetStrategy = "first" | "last" | "strongest" | "weakest" | "densest";
+
+type TowerLike = TowerInstance & {
+  config?: { upgrades: Array<{ range: number; splashRadius?: number }> };
+};
+
+function currentUpgrade(tower: TowerLike): { range: number; splashRadius?: number } {
+  const cfg = tower.config;
+  if (!cfg) return { range: 0 };
+  return cfg.upgrades[Math.max(0, (tower.level ?? 1) - 1)];
+}
+
+function distance2D(ax: number, az: number, bx: number, bz: number): number {
+  return Math.hypot(ax - bx, az - bz);
+}
 
 export function acquireTarget(
   tower: TowerInstance,
@@ -20,7 +38,11 @@ export function acquireTarget(
   strategy: TargetStrategy
 ): EnemyInstance | null {
   if (enemies.length === 0) return null;
-  const inRange = enemies.filter((e) => e.alive && distance2D(tower.x, tower.z, e.x, e.z) <= towerConfig(tower).range);
+  const range = currentUpgrade(tower as TowerLike).range;
+  if (range <= 0) return null;
+  const inRange = enemies.filter(
+    (e) => e.alive && distance2D(tower.x, tower.z, e.x, e.z) <= range
+  );
   if (inRange.length === 0) return null;
 
   switch (strategy) {
@@ -39,7 +61,7 @@ export function acquireTarget(
     case "densest": {
       // The enemy with the most other enemies within `splashRadius` of it.
       // Falls back to "first" if there's no splash radius.
-      const r = towerConfig(tower).upgrades[tower.level - 1].splashRadius ?? 1.2;
+      const r = currentUpgrade(tower as TowerLike).splashRadius ?? 1.2;
       let best = inRange[0];
       let bestCount = -1;
       for (const e of inRange) {
@@ -55,23 +77,4 @@ export function acquireTarget(
       return best;
     }
   }
-}
-
-function distance2D(ax: number, az: number, bx: number, bz: number): number {
-  return Math.hypot(ax - bx, az - bz);
-}
-
-// Local re-export of the per-tower config so the module compiles without
-// pulling gameConfig into the engine bundle. The Engine wires the real
-// config lookup at runtime.
-type TowerConfigLike = {
-  range: number;
-  upgrades: Array<{ splashRadius?: number }>;
-};
-function towerConfig(t: TowerInstance): TowerConfigLike {
-  // The `PlacedTower` type carries the full config; the engine keeps the
-  // accessor on the instance so the engine can call this without a
-  // separate lookup. For type-completeness, this stub returns the
-  // same shape but the engine replaces it with the real `config` field.
-  return (t as unknown as { config: TowerConfigLike }).config;
 }

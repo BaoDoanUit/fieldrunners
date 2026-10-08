@@ -1,12 +1,19 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { io, Socket } from "socket.io-client";
 import { gameConfig, getEnemyConfig, getTowerConfig, type EnemyKind, type TowerConfig, type TowerKind } from "../shared/gameConfig";
-import type { BattlePhase, EnemyInstance, ProjectileInstance, SavedProgress, TelemetryEvent, TowerInstance } from "../shared/gameTypes";
+import type { BattlePhase, EnemyInstance, ProjectileInstance, SavedProgress, TelemetryEvent, TelemetryEventName, TowerInstance } from "../shared/gameTypes";
+import { TELEMETRY_VERSION } from "../shared/gameTypes";
 import * as THREE from "three";
 import { Sfx } from "../audio/Sfx";
+import { Haptics } from "../audio/Haptics";
 import { CardstockSheet } from "./CardstockSheet";
 import { HomeMenu } from "./HomeMenu";
 import { MapPlate } from "./MapPlate";
+import { TutorialFlow } from "./TutorialFlow";
+import { RoundCompleteSheet } from "./RoundCompleteSheet";
+import { PauseSheet } from "./PauseSheet";
+import { SettingsScreen } from "./SettingsScreen";
+import { SoldConfirmSheet } from "./SoldConfirmSheet";
 import { Engine } from "../engine/Engine";
 
 const STORAGE_KEY = "fieldrunner-defense-save-v1";
@@ -50,8 +57,8 @@ export function App() {
   const [progress, setProgress] = usePersistedProgress();
   const [phase, setPhase] = useState<BattlePhase>(progress.tutorialComplete ? "menu" : "tutorial");
   const [roundIndex, setRoundIndex] = useState(0);
-  const [currency, setCurrency] = useState(120);
-  const [lives, setLives] = useState(20);
+  const [currency, setCurrency] = useState(gameConfig.tuning.startingCurrency);
+  const [lives, setLives] = useState(gameConfig.tuning.startingLives);
   const [score, setScore] = useState(0);
   const [selectedTower, setSelectedTower] = useState<TowerConfig | null>(null);
   const [inspectTower, setInspectTower] = useState<PlacedTower | null>(null);
@@ -67,7 +74,38 @@ export function App() {
   const [leaderboard, setLeaderboard] = useState<{ score: number; round: number; name: string }[]>([]);
   const [configReady, setConfigReady] = useState(false);
   const [serverOnline, setServerOnline] = useState(false);
-  const [roundSummary, setRoundSummary] = useState<{ defeated: number; escaped: number; earned: number } | null>(null);
+  const [roundSummary, setRoundSummary] = useState<{ defeated: number; escaped: number; earned: number; score: number } | null>(null);
+  // Phase 3.5: confirmed sell — when set, the SoldConfirmSheet is shown.
+  const [soldConfirm, setSoldConfirm] = useState<{ id: string; name: string; refund: number } | null>(null);
+  // Phase 3.10: reduced motion preference (overrides system default).
+  const [reducedMotion, setReducedMotion] = useState<boolean>(() => {
+    if (typeof window === "undefined") return false;
+    return window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
+  });
+
+  // Mirror the in-app reduced-motion setting onto a <html> class so
+  // CSS animations (sheet-rise, overlay-fade, loading-blink, etc.)
+  // are skipped. The class-based media query in styles.css is what
+  // most rules already opt into via @media (prefers-reduced-motion).
+  useEffect(() => {
+    const root = document.documentElement;
+    if (reducedMotion) root.classList.add("reduced-motion");
+    else root.classList.remove("reduced-motion");
+  }, [reducedMotion]);
+
+  // Subscribe to OS-level reduced-motion changes. The SettingsScreen
+  // toggle overrides the OS preference, but when the user hasn't
+  // explicitly toggled, we follow the OS live.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const mq = window.matchMedia?.("(prefers-reduced-motion: reduce)");
+    if (!mq) return;
+    const onChange = (e: MediaQueryListEvent) => setReducedMotion(e.matches);
+    mq.addEventListener("change", onChange);
+    return () => mq.removeEventListener("change", onChange);
+  }, []);
+  // Phase 3.1: world events the TutorialFlow listens for.
+  const [worldEventCount, setWorldEventCount] = useState<{ placement: number; wave_started: number }>({ placement: 0, wave_started: 0 });
 
   const socketRef = useRef<Socket | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -112,7 +150,13 @@ export function App() {
   useEffect(() => {
     fetch("/api/config")
       .then((res) => res.json())
-      .then(() => setServerOnline(true))
+      .then(() => {
+        setServerOnline(true);
+        // Emit the canonical "app open" tracking event once the
+        // config is loaded. server_connected is shown in the
+        // local UI but is NOT in the tracking plan.
+        pushTelemetry("app_open", { source: "boot" });
+      })
       .catch(() => setServerOnline(false))
       .finally(() => setConfigReady(true));
 
@@ -125,7 +169,10 @@ export function App() {
     socketRef.current = socket;
     socket.on("connect", () => setServerOnline(true));
     socket.on("disconnect", () => setServerOnline(false));
-    socket.on("server:hello", () => pushTelemetry("socket_connected"));
+    socket.on("server:hello", () => {
+      // Local-only signal — not part of the 20-event tracking plan.
+      setTelemetryLog((logs) => ["socket_connected", ...logs].slice(0, 6));
+    });
     socket.on("telemetry", (event) => console.log("telemetry", event));
 
     return () => {
@@ -244,8 +291,8 @@ export function App() {
     }
   }, [activeRound, phase]);
 
-  function pushTelemetry(name: string, payload: Record<string, unknown> = {}) {
-    const event: TelemetryEvent = { name, ts: Date.now(), payload };
+  function pushTelemetry(name: TelemetryEventName, payload: Record<string, unknown> = {}) {
+    const event: TelemetryEvent = { version: TELEMETRY_VERSION, name, ts: Date.now(), payload };
     setTelemetryLog((logs) => [`${name}`, ...logs].slice(0, 6));
     fetch("/api/telemetry", {
       method: "POST",
@@ -259,8 +306,8 @@ export function App() {
     engineRef.current = new Engine("fieldrunner-default");
     setRoundIndex(startRound - 1);
     setActiveRound(startRound);
-    setCurrency(120);
-    setLives(20);
+    setCurrency(gameConfig.tuning.startingCurrency);
+    setLives(gameConfig.tuning.startingLives);
     setScore(0);
     setSelectedTower(null);
     setInspectTower(null);
@@ -281,14 +328,37 @@ export function App() {
     setRoundIndex(nextIndex);
     setActiveRound(nextIndex + 1);
     setPhase("building");
-    setMessage(`Prepare for Round ${nextIndex + 1}.`);
+    const nextRoundCfg = gameConfig.rounds[nextIndex];
+    setMessage(
+      `Prepare for Round ${nextIndex + 1}. ${nextRoundCfg.briefing}`
+    );
     pushTelemetry("round_completed", { round: activeRound });
+    // Bump unlockedRound so the player can start the run from this
+    // new round. Emit round_unlocked only when it actually advances.
+    setProgress((prev) => {
+      const nextUnlocked = Math.max(prev.unlockedRound, nextIndex + 1);
+      if (nextUnlocked > prev.unlockedRound) {
+        pushTelemetry("round_unlocked", { round: nextUnlocked });
+      }
+      return { ...prev, unlockedRound: nextUnlocked };
+    });
   }
 
   function handleVictory() {
     setPhase("victory");
     setMessage("Round 20 cleared. Victory!");
-    setProgress((prev) => ({ ...prev, unlockedRound: Math.max(prev.unlockedRound, 20), bestScore: Math.max(prev.bestScore, score) }));
+    setProgress((prev) => {
+      const nextUnlocked = Math.max(prev.unlockedRound, 20);
+      if (nextUnlocked > prev.unlockedRound) {
+        pushTelemetry("round_unlocked", { round: nextUnlocked });
+      }
+      return {
+        ...prev,
+        unlockedRound: nextUnlocked,
+        bestScore: Math.max(prev.bestScore, score)
+      };
+    });
+    pushTelemetry("run_won", { finalScore: score });
   }
 
   function handleDefeat() {
@@ -296,6 +366,7 @@ export function App() {
     setPaused(false);
     setMessage("The defense fell. Retry quickly from the current state.");
     setProgress((prev) => ({ ...prev, bestScore: Math.max(prev.bestScore, score) }));
+    pushTelemetry("round_failed", { round: activeRound, score });
   }
 
   function completeTutorial() {
@@ -334,6 +405,7 @@ export function App() {
       pushTelemetry("tower_placed", { kind: selectedTower.kind });
       Sfx.play("place-tower");
       if (progress.settings.haptics) navigator.vibrate?.(10);
+      setWorldEventCount((c) => ({ ...c, placement: c.placement + 1 }));
     }
   }
 
@@ -343,6 +415,7 @@ export function App() {
     setPhase("combat");
     setMessage(`Round ${activeRound} is underway.`);
     pushTelemetry("round_started", { round: activeRound });
+    setWorldEventCount((c) => ({ ...c, wave_started: c.wave_started + 1 }));
   }
 
   function togglePause() {
@@ -371,7 +444,16 @@ export function App() {
     setInspectTower(null);
     setMessage("Tower sold.");
     pushTelemetry("tower_sold", { towerId });
+    setSoldConfirm(null);
     Sfx.play("ink-press");
+  }
+
+  function requestSell(towerId: string) {
+    const t = engineRef.current.getTower(towerId);
+    if (!t) return;
+    const invested = t.config.cost + t.config.upgrades.slice(0, t.level - 1).reduce((s, u) => s + u.cost, 0);
+    const refund = Math.round(invested * t.config.sellMultiplier);
+    setSoldConfirm({ id: towerId, name: t.config.name, refund });
   }
 
   function spawnDebugEnemy(kind: EnemyKind) {
@@ -403,7 +485,12 @@ export function App() {
       } else {
         setPhase("building");
         setMessage(`Round ${activeRound} cleared. Buy more defense or start the next wave.`);
-        setCurrency((value) => value + gameConfig.rounds[roundIndex].reward);
+        const clearedRound = gameConfig.rounds[roundIndex];
+        setCurrency((value) => value + clearedRound.reward);
+        // livesBonus is a hand-tuned milestone reward (round 10 +2, round 20 +3).
+        if (clearedRound.livesBonus) {
+          setLives((value) => Math.min(gameConfig.tuning.maxLives, value + clearedRound.livesBonus!));
+        }
         nextRound();
         Sfx.play("round-cleared");
       }
@@ -532,28 +619,85 @@ export function App() {
     );
   }
 
-  // Settings screen (Phase 1: minimal placeholder; full screen ships in Phase 3)
+  // Settings screen (Phase 3.4)
   if (phase === "settings") {
     return (
-      <CardstockSheet
-        title="Settings"
-        stamp="Preferences"
-        folio="P. 11 / 13"
+      <SettingsScreen
+        progress={progress}
+        reducedMotion={reducedMotion}
+        onChange={(next) => {
+          // Compute the keys that actually changed (settings block only).
+          const changed = Object.keys(next.settings ?? {});
+          setProgress((prev) => ({ ...prev, ...next }));
+          if (changed.length > 0) {
+            pushTelemetry("settings_changed", { keys: changed });
+          }
+        }}
+        onReducedMotionChange={(next) => {
+          setReducedMotion(next);
+          pushTelemetry("settings_changed", { keys: ["reducedMotion"], value: next });
+        }}
+        onResetProgress={() => {
+          const fresh = { ...defaultSave };
+          setProgress(fresh);
+          setRoundIndex(0);
+          setActiveRound(1);
+          setLives(gameConfig.tuning.startingLives);
+          setCurrency(gameConfig.tuning.startingCurrency);
+          setScore(0);
+          setTowerCount(0);
+          setInspectTower(null);
+          setSoldConfirm(null);
+          setPhase("tutorial");
+          Sfx.mute(false);
+          Haptics.setEnabled(false);
+        }}
         onClose={() => setPhase("menu")}
-        actions={[
-          { label: "Done", onClick: () => setPhase("menu"), primary: true }
-        ]}
-      >
-        <p>
-          Settings (music, SFX, haptics, reduced motion) ship in
-          <strong> Phase 3</strong>. The static map and the home menu
-          are now wired and audible; the in-game settings panel will
-          toggle them live without a reload.
-        </p>
-        <p className="detail-card muted" style={{ marginTop: "8px" }}>
-          Current audio state: {Sfx.isMuted() ? "muted" : "live"}.
-        </p>
-      </CardstockSheet>
+      />
+    );
+  }
+
+  // Pause overlay (Phase 3.3)
+  if (paused && (phase === "building" || phase === "combat")) {
+    return (
+      <PauseSheet
+        onResume={() => setPaused(false)}
+        onRestart={() => beginRun(activeRound)}
+        onHome={() => setPhase("menu")}
+      />
+    );
+  }
+
+  // Round-complete sheet (Phase 3.2) — only show after the build->combat
+  // round transition has settled, and the engine has handed us a
+  // roundComplete payload.
+  if (phase === "building" && roundSummary && !paused) {
+    return (
+      <RoundCompleteSheet
+        round={roundSummary.earned ? activeRound : activeRound}
+        defeated={roundSummary.defeated}
+        escaped={roundSummary.escaped}
+        earned={roundSummary.earned}
+        score={roundSummary.score}
+        isFinal={activeRound >= 20}
+        onNext={() => {
+          setRoundSummary(null);
+          if (activeRound >= 20) beginRun(1);
+        }}
+        onReview={() => setRoundSummary(null)}
+      />
+    );
+  }
+
+  // Sold-tower confirmation (Phase 3.5)
+  if (soldConfirm) {
+    return (
+      <SoldConfirmSheet
+        towerName={soldConfirm.name}
+        refund={soldConfirm.refund}
+        onConfirm={() => sellTower(soldConfirm.id)}
+        onCancel={() => setSoldConfirm(null)}
+      />
     );
   }
 
@@ -650,6 +794,7 @@ export function App() {
                     onClick={() => {
                       setSelectedTower(tower);
                       setMessage(`${tower.name}: ${tower.description}`);
+                      pushTelemetry("tower_selected", { kind: tower.kind });
                     }}
                   >
                     <span className="glyph" aria-hidden>
@@ -691,7 +836,7 @@ export function App() {
                   <button disabled={inspectTower.level >= 3 || currency < (getTowerConfig(inspectTower.kind).upgrades[inspectTower.level] ?? { cost: 9999 }).cost} onClick={() => upgradeTower(inspectTower.id)}>
                     Upgrade
                   </button>
-                  <button onClick={() => sellTower(inspectTower.id)}>Sell</button>
+                  <button onClick={() => requestSell(inspectTower.id)}>Sell</button>
                   <button onClick={() => setInspectTower(null)}>Close</button>
                 </div>
               </div>
@@ -741,8 +886,21 @@ export function App() {
       </main>
 
       {phase === "victory" && <Overlay stamp="Order 20 · Complete" folio="P. 13 / 13" title="Victory" body="You cleared Round 20. Replay or start a new run to improve score." actions={[{ label: "Restart Round 1", onClick: () => beginRun(1), primary: true }, { label: "Continue Run", onClick: () => beginRun(progress.unlockedRound) }]} />}
-      {phase === "defeat" && <Overlay stamp={`Order ${activeRound} · Failed`} folio={`P. ${String(Math.min(activeRound, 13)).padStart(2, "0")} / 13`} title="Defeat" body="Enemies reached the endpoint. Retry immediately and refine tower placement." actions={[{ label: `Retry Round ${activeRound}`, onClick: () => beginRun(activeRound), primary: true }, { label: "Home", onClick: () => setPhase("menu") }]} />}
-      {phase === "tutorial" && <Overlay stamp="Briefing 00" folio="P. 00 / 13" title="Tutorial" body="Tap a tower card, place it on a valid zone, then start the wave. Towers can be upgraded and sold during the run." actions={[{ label: "Finish Tutorial", onClick: completeTutorial, primary: true }, { label: "Skip", onClick: skipTutorial }]} />}
+      {phase === "defeat" && <Overlay stamp={`Order ${activeRound} · Failed`} folio={`P. ${String(Math.min(activeRound, 13)).padStart(2, "0")} / 13`} title="Defeat" body="Enemies reached the endpoint. Retry immediately and refine tower placement." actions={[{ label: `Retry Round ${activeRound}`, onClick: () => { pushTelemetry("retry_clicked", { round: activeRound }); beginRun(activeRound); }, primary: true }, { label: "Home", onClick: () => setPhase("menu") }]} />}
+      {phase === "tutorial" && (
+        <TutorialFlow
+          onFinish={() => {
+            setProgress((prev) => ({ ...prev, tutorialComplete: true }));
+            setPhase("menu");
+          }}
+          onSkip={() => {
+            setProgress((prev) => ({ ...prev, tutorialComplete: true }));
+            setPhase("menu");
+          }}
+          onWorldEvent={() => { /* counter is read via worldEventCount below */ }}
+          worldEventCount={worldEventCount}
+        />
+      )}
 
       {debugMode && (
         <div className="debug-strip">
