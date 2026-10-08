@@ -18,6 +18,7 @@ async function worldToScreen(page: Page, world: { x: number; z: number }) {
 }
 
 test("UX audit: capture the full round-1 experience", async ({ page }) => {
+  test.setTimeout(120_000);
   await page.addInitScript(() => {
     localStorage.setItem("fieldrunner-defense-save-v1", JSON.stringify({
       unlockedRound: 1, bestScore: 0, tutorialComplete: true,

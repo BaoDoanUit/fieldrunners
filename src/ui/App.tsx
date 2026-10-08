@@ -136,6 +136,16 @@ export function App() {
       }
     });
   }, []);
+  // Phase 2.9 UX: each chevron along the path owns its own
+  // material + phase offset, so the per-frame tick can pulse them
+  // in sequence and the path "marches" toward the goal. Materials
+  // are kept on the array (not freed) so the safety-net re-render
+  // can keep updating them after the scene is built.
+  type ChevronRecord = {
+    mesh: THREE.Mesh;
+    material: THREE.MeshBasicMaterial;
+    phase: number;
+  };
   const sceneRef = useRef<{
     renderer: THREE.WebGLRenderer;
     scene: THREE.Scene;
@@ -147,6 +157,7 @@ export function App() {
     rangeGroup: THREE.Group;
     buildMarkerGroup: THREE.Group;
     vfxGroup: THREE.Group;
+    chevrons: ChevronRecord[];
   } | null>(null);
   const vfxRef = useRef<VfxManager | null>(null);
   // Phase 2.4: tracks the engine event subscription so beginRun can
@@ -306,12 +317,12 @@ export function App() {
     // than a wall, and the chevrons give it direction.
     const PATH_WIDTH = 1.2;
     const pathMaterial = new THREE.MeshStandardMaterial({ color: "#4a6a8a", roughness: 1 });
-    const chevronMaterial = new THREE.MeshBasicMaterial({
-      color: "#7da4cc",
-      transparent: true,
-      opacity: 0.55,
-      side: THREE.DoubleSide
-    });
+    // Phase 2.9: per-chevron materials so the tick loop can pulse
+    // them in sequence (a "marching" wave that points toward the
+    // goal). Sharing one material would mean all chevrons lit up
+    // at once — useful as a debug signal, not as UX.
+    const CHEVRON_BASE_OPACITY = 0.45;
+    const CHEVRON_PEAK_OPACITY = 0.95;
     const pathPoints = gameConfig.path.map((point) => new THREE.Vector3(point.x, 0.02, point.z));
     // Build a small chevron (▷) shape once and reuse it per segment.
     const chevronShape = new THREE.Shape();
@@ -321,6 +332,8 @@ export function App() {
     chevronShape.lineTo(-0.08, 0);
     chevronShape.closePath();
     const chevronGeometry = new THREE.ShapeGeometry(chevronShape);
+    const chevrons: ChevronRecord[] = [];
+    let chevronCounter = 0;
     for (let i = 0; i < pathPoints.length - 1; i += 1) {
       const a = pathPoints[i];
       const b = pathPoints[i + 1];
@@ -335,17 +348,27 @@ export function App() {
       map.add(segment);
 
       // Directional chevrons — drop one every ~1.2 units along the
-      // segment, rotated to point along the path.
+      // segment, rotated to point along the path. Each chevron
+      // owns a unique phase so the pulse travels from spawn
+      // toward the goal.
       const dir = new THREE.Vector3(b.x - a.x, 0, b.z - a.z).normalize();
       const yaw = Math.atan2(dir.x, dir.z);
       const spacing = 1.2;
       const count = Math.max(1, Math.floor(length / spacing));
       for (let c = 1; c <= count; c += 1) {
         const t = c / (count + 1);
-        const chevron = new THREE.Mesh(chevronGeometry, chevronMaterial);
+        const material = new THREE.MeshBasicMaterial({
+          color: "#7da4cc",
+          transparent: true,
+          opacity: CHEVRON_BASE_OPACITY,
+          side: THREE.DoubleSide
+        });
+        const chevron = new THREE.Mesh(chevronGeometry, material);
         chevron.position.set(a.x + dir.x * length * t, 0.06, a.z + dir.z * length * t);
         chevron.rotation.set(-Math.PI / 2, 0, -yaw);
         map.add(chevron);
+        chevrons.push({ mesh: chevron, material, phase: chevronCounter * 0.55 });
+        chevronCounter += 1;
       }
     }
 
@@ -358,7 +381,7 @@ export function App() {
       buildMarkerGroup.add(pad);
     });
 
-    sceneRef.current = { renderer, scene, camera, map, towerGroup, enemyGroup, projectileGroup, rangeGroup, buildMarkerGroup, vfxGroup };
+    sceneRef.current = { renderer, scene, camera, map, towerGroup, enemyGroup, projectileGroup, rangeGroup, buildMarkerGroup, vfxGroup, chevrons };
 
     // Phase 2.4: subscribe to engine events for VFX. We only do this
     // once per engine instance; the VFX manager decides whether to
@@ -417,6 +440,20 @@ export function App() {
         // Even while paused, drain any leftover VFX so they don't
         // freeze on screen forever.
         vfxManager.tick(dt * 0.5);
+      }
+
+      // Phase 2.9 UX: marching chevrons. The opacity of each
+      // chevron along the path is driven by a sin wave whose
+      // phase is offset by index — so the bright peak travels
+      // from the spawn toward the goal. Skipped when reduced
+      // motion is on so the opt-out still sees a static path.
+      if (!reducedMotion && sceneRef.current) {
+        const wave = Math.sin(now / 480);
+        const range = CHEVRON_PEAK_OPACITY - CHEVRON_BASE_OPACITY;
+        for (let i = 0; i < sceneRef.current.chevrons.length; i += 1) {
+          const rec = sceneRef.current.chevrons[i];
+          rec.material.opacity = CHEVRON_BASE_OPACITY + range * (0.5 + 0.5 * Math.sin(wave + rec.phase));
+        }
       }
 
       // Phase 2.5: subtle camera parallax toward the cursor (or
