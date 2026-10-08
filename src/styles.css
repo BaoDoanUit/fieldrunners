@@ -293,6 +293,13 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .stage-card[data-tower-selected="false"] .stage-canvas {
   cursor: default;
 }
+/* Phase 2.9: when the cursor is over a placed tower (and we're not
+   already in placement mode), the canvas becomes a pointer — the
+   tower is clickable for inspection. Selection takes priority, so
+   the crosshair wins over the pointer. */
+.stage-card[data-tower-hovered="true"]:not([data-tower-selected="true"]) .stage-canvas {
+  cursor: pointer;
+}
 
 /* HUD overlay inside the stage */
 .hud-overlay {

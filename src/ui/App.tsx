@@ -66,6 +66,11 @@ export function App() {
   // Cursor world position; null when the pointer is not over the stage.
   // Drives the in-canvas range ring for the currently selected tower.
   const [cursorWorld, setCursorWorld] = useState<{ x: number; z: number } | null>(null);
+  // Phase 2.9 UX: track which placed tower the cursor is over so
+  // we can (a) flip the canvas cursor to "pointer" and (b) brighten
+  // the tower's base ring. Without this the player has no signal
+  // that placed towers are clickable for inspection.
+  const [hoveredTower, setHoveredTower] = useState<PlacedTower | null>(null);
   const [message, setMessage] = useState("Tap Play to begin Round 1.");
   const [towerCount, setTowerCount] = useState(0);
   const [activeRound, setActiveRound] = useState(1);
@@ -146,6 +151,15 @@ export function App() {
     material: THREE.MeshBasicMaterial;
     phase: number;
   };
+  // Phase 2.9 UX: each placed tower has a persistent base ring in
+  // a dedicated group so the per-frame tick can pulse them. The
+  // group is NOT cleared by syncScene (which only knows about the
+  // dynamic mesh group), so the rings stay across frames.
+  type TowerRingRecord = {
+    mesh: THREE.Mesh;
+    material: THREE.MeshBasicMaterial;
+    phase: number;
+  };
   const sceneRef = useRef<{
     renderer: THREE.WebGLRenderer;
     scene: THREE.Scene;
@@ -157,6 +171,8 @@ export function App() {
     rangeGroup: THREE.Group;
     buildMarkerGroup: THREE.Group;
     vfxGroup: THREE.Group;
+    towerBaseRingGroup: THREE.Group;
+    towerBaseRings: Map<string, TowerRingRecord>;
     chevrons: ChevronRecord[];
   } | null>(null);
   const vfxRef = useRef<VfxManager | null>(null);
@@ -295,11 +311,17 @@ export function App() {
     const projectileGroup = new THREE.Group();
     const rangeGroup = new THREE.Group();
     const buildMarkerGroup = new THREE.Group();
+    // Phase 2.9: persistent base-ring group for placed towers.
+    // Owned separately so the per-frame tick can pulse them and
+    // syncScene (which clears the dynamic tower group) doesn't
+    // wipe them out.
+    const towerBaseRingGroup = new THREE.Group();
+    const towerBaseRings = new Map<string, TowerRingRecord>();
     // Phase 2.4: VFX group, owned by the VfxManager.
     const vfxManager = new VfxManager(reducedMotion);
     const vfxGroup = vfxManager.sceneGroup();
     vfxRef.current = vfxManager;
-    scene.add(map, towerGroup, enemyGroup, projectileGroup, rangeGroup, buildMarkerGroup, vfxGroup);
+    scene.add(map, towerGroup, enemyGroup, projectileGroup, rangeGroup, buildMarkerGroup, towerBaseRingGroup, vfxGroup);
 
     const ground = new THREE.Mesh(
       new THREE.PlaneGeometry(22, 20),
@@ -381,7 +403,7 @@ export function App() {
       buildMarkerGroup.add(pad);
     });
 
-    sceneRef.current = { renderer, scene, camera, map, towerGroup, enemyGroup, projectileGroup, rangeGroup, buildMarkerGroup, vfxGroup, chevrons };
+    sceneRef.current = { renderer, scene, camera, map, towerGroup, enemyGroup, projectileGroup, rangeGroup, buildMarkerGroup, vfxGroup, towerBaseRingGroup, towerBaseRings, chevrons };
 
     // Phase 2.4: subscribe to engine events for VFX. We only do this
     // once per engine instance; the VFX manager decides whether to
@@ -453,6 +475,65 @@ export function App() {
         for (let i = 0; i < sceneRef.current.chevrons.length; i += 1) {
           const rec = sceneRef.current.chevrons[i];
           rec.material.opacity = CHEVRON_BASE_OPACITY + range * (0.5 + 0.5 * Math.sin(wave + rec.phase));
+        }
+      }
+
+      // Phase 2.9 UX: per-tower base rings. They pulse subtly to
+      // signal "clickable for inspection" and brighten further
+      // when the cursor is over them or one is currently being
+      // inspected. Rings persist across frames in a dedicated
+      // group so we can mutate their material here. Towers that
+      // get sold/removed are pruned from the map.
+      if (sceneRef.current) {
+        const ringMap = sceneRef.current.towerBaseRings;
+        const ringGroup = sceneRef.current.towerBaseRingGroup;
+        const placedTowers = engineRef.current.towers;
+        const placedIds = new Set<string>();
+        for (let i = 0; i < placedTowers.length; i += 1) {
+          const tower = placedTowers[i];
+          placedIds.add(tower.id);
+          let rec = ringMap.get(tower.id);
+          if (!rec) {
+            const material = new THREE.MeshBasicMaterial({
+              color: getTowerConfig(tower.kind).color,
+              transparent: true,
+              opacity: 0.55,
+              side: THREE.DoubleSide
+            });
+            const mesh = new THREE.Mesh(new THREE.RingGeometry(0.62, 0.88, 24), material);
+            mesh.rotation.x = -Math.PI / 2;
+            mesh.position.set(tower.x, 0.045, tower.z);
+            // Per-tower phase offset so the pulse looks organic
+            // when several towers are on the field.
+            rec = { mesh, material, phase: i * 0.9 };
+            ringMap.set(tower.id, rec);
+            ringGroup.add(mesh);
+          } else {
+            // Towers can be upgraded (cost refunded etc.) — keep
+            // position in sync with the engine in case it ever
+            // changes. Today positions are immutable after place.
+            rec.mesh.position.set(tower.x, 0.045, tower.z);
+          }
+          // Base opacity: pulse subtly, brighten if hovered or
+          // currently inspected, peak on both. Skipped entirely
+          // under reducedMotion so the opt-out sees a static ring.
+          const isHovered = hoveredTower?.id === tower.id;
+          const isInspected = inspectTower?.id === tower.id;
+          if (reducedMotion) {
+            rec.material.opacity = isHovered || isInspected ? 0.95 : 0.7;
+          } else {
+            const pulse = 0.5 + 0.5 * Math.sin(now / 900 + rec.phase);
+            const base = 0.45 + 0.18 * pulse;
+            rec.material.opacity = isInspected ? 1.0 : isHovered ? base + 0.4 : base;
+          }
+        }
+        // Prune rings for towers that no longer exist (sold, etc).
+        for (const [id, rec] of ringMap) {
+          if (placedIds.has(id)) continue;
+          ringGroup.remove(rec.mesh);
+          rec.material.dispose();
+          rec.mesh.geometry.dispose();
+          ringMap.delete(id);
         }
       }
 
@@ -943,20 +1024,9 @@ export function App() {
 
       scene.towerGroup.add(group);
 
-      // Bright base ring lying flat on the ground — a per-tower
-      // "stand" that makes placement obvious from any camera angle.
-      const baseRing = new THREE.Mesh(
-        new THREE.RingGeometry(0.62, 0.88, 24),
-        new THREE.MeshBasicMaterial({
-          color: towerConfig.color,
-          transparent: true,
-          opacity: 0.7,
-          side: THREE.DoubleSide
-        })
-      );
-      baseRing.rotation.x = -Math.PI / 2;
-      baseRing.position.set(tower.x, 0.045, tower.z);
-      scene.towerGroup.add(baseRing);
+      // Phase 2.9: the persistent base ring is rendered from
+      // tick() so it can pulse + react to hover. The previous
+      // static per-frame ring is gone.
 
       if (inspectTower?.id === tower.id) {
         const range = towerConfig.upgrades[level - 1].range;
@@ -1176,6 +1246,7 @@ export function App() {
         <section
           className="stage-card"
           data-tower-selected={selectedTower ? "true" : "false"}
+          data-tower-hovered={hoveredTower && !selectedTower ? "true" : "false"}
           data-phase={phase}
         >
           <div className="stage-frame">
@@ -1189,28 +1260,44 @@ export function App() {
                 const worldX = clamp((x - 0.5) * 18, -9, 9);
                 const worldZ = clamp((0.5 - z) * 16, -8, 8);
                 setCursorWorld({ x: worldX, z: worldZ });
+                // Phase 2.9: also track hover over placed towers so
+                // the canvas cursor + base ring can react. When a
+                // tower is selected for placement, hover state is
+                // suppressed so the crosshair stays the priority.
+                setHoveredTower(selectedTower ? null : engineRef.current.findTowerAt(worldX, worldZ));
               }}
-              onPointerLeave={() => setCursorWorld(null)}
+              onPointerLeave={() => {
+                setCursorWorld(null);
+                setHoveredTower(null);
+              }}
               onPointerDown={(event) => {
                 const rect = event.currentTarget.getBoundingClientRect();
                 const x = (event.clientX - rect.left) / rect.width;
                 const z = (event.clientY - rect.top) / rect.height;
                 const worldX = clamp((x - 0.5) * 18, -9, 9);
                 const worldZ = clamp((0.5 - z) * 16, -8, 8);
-                const nearest = gameConfig.buildZones.reduce((best, zone) => {
-                  const distance = distance2D(worldX, worldZ, zone.x, zone.z);
-                  return distance < best.distance ? { zone, distance } : best;
-                }, { zone: null as (typeof gameConfig.buildZones)[number] | null, distance: Number.POSITIVE_INFINITY });
-
-                if (nearest.zone && nearest.distance < 1.4) {
-                  attemptPlacement(nearest.zone.x, nearest.zone.z);
-                  return;
-                }
-
+                // Phase 2.9 UX fix: precedence is tower > zone.
+                // Previously we tried to place on the nearest zone
+                // first and returned early when the zone was
+                // "occupied" — which meant clicking your own
+                // placed tower (it sits at the zone center) could
+                // never open the inspector. Now we look for a
+                // placed tower first, and only fall back to zone
+                // placement if no tower is under the cursor and a
+                // tower card is selected.
                 const clickedTower = engineRef.current.findTowerAt(worldX, worldZ);
                 if (clickedTower) {
                   setInspectTower(clickedTower);
                   setMessage(`${getTowerConfig(clickedTower.kind).name} selected.`);
+                  return;
+                }
+
+                const nearest = gameConfig.buildZones.reduce((best, zone) => {
+                  const distance = distance2D(worldX, worldZ, zone.x, zone.z);
+                  return distance < best.distance ? { zone, distance } : best;
+                }, { zone: null as (typeof gameConfig.buildZones)[number] | null, distance: Number.POSITIVE_INFINITY });
+                if (nearest.zone && nearest.distance < 1.4) {
+                  attemptPlacement(nearest.zone.x, nearest.zone.z);
                 }
               }}
             />

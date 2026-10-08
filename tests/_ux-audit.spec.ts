@@ -49,6 +49,29 @@ test("UX audit: capture the full round-1 experience", async ({ page }) => {
   await page.waitForTimeout(500);
   await page.screenshot({ path: `${DIR}/D-tower-placed.png` });
 
+  // Phase 2.9: verify hover-cursor + inspector flow BEFORE the
+  // wave starts (the round-cleared sheet would otherwise block
+  // the canvas and prevent the click from reaching it).
+  await page.mouse.move(0, 0);  // park cursor off the canvas
+  await page.waitForTimeout(150);
+  await page.mouse.move(t.x, t.y, { steps: 4 });
+  await page.waitForTimeout(250);
+  const hoverCursor = await page.locator(".stage-canvas").evaluate((el) =>
+    getComputedStyle(el).cursor
+  );
+  console.log("Canvas cursor (tower hovered):", hoverCursor);
+  await page.mouse.click(t.x, t.y);
+  await page.waitForTimeout(400);
+  const inspectorText = await page.locator(".panel-block", { hasText: "Inspector" })
+    .innerText()
+    .catch(() => "");
+  console.log("Inspector text after click:", inspectorText.replace(/\s+/g, " ").slice(0, 120));
+  await page.screenshot({ path: `${DIR}/D2-tower-inspected.png` });
+  // Close the inspector so the next screenshot shows a clean canvas
+  const closeBtn = page.getByRole("button", { name: /Close/i });
+  if (await closeBtn.count()) await closeBtn.first().click();
+  await page.waitForTimeout(200);
+
   // D. The "Start Wave" button — is it clearly enabled?
   const startWaveBtn = page.getByRole("button", { name: /Start Wave/i });
   const isDisabled = await startWaveBtn.isDisabled();
