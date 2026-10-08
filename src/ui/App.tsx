@@ -180,6 +180,21 @@ export function App() {
   // rebind VFX to a fresh engine.
   const engineVfxOffRef = useRef<(() => void) | null>(null);
   const pausedRef = useRef(false);
+  // Phase 2.9: mirrors of React state that the canvas useEffect's
+  // tick loop reads. The canvas effect's deps are
+  // [canvasEl, reducedMotion], so the tick function (and the
+  // syncScene closure it calls) captures the values of these
+  // state variables at the time the effect first ran. The
+  // inspected-tower range ring rendering was silently broken
+  // because of this — setInspectTower updated React state but
+  // the closure still saw inspectTower === null. Mirroring
+  // into refs and reading from the refs in syncScene gives the
+  // tick loop a fresh view of the latest state every frame.
+  const selectedTowerRef = useRef<TowerConfig | null>(null);
+  const cursorWorldRef = useRef<{ x: number; z: number } | null>(null);
+  const phaseRef = useRef<BattlePhase>("menu");
+  const inspectTowerRef = useRef<PlacedTower | null>(null);
+  const hoveredTowerRef = useRef<PlacedTower | null>(null);
   // Phase 2.9: refs into the right rail so we can auto-scroll the
   // Inspector into view when the player clicks a placed tower.
   // Without this, the panel content can be tall enough that the
@@ -238,6 +253,15 @@ export function App() {
   useEffect(() => {
     pausedRef.current = paused;
   }, [paused]);
+
+  // Phase 2.9: keep refs in sync with state so the canvas-init
+  // useEffect's tick loop (which captures these values once and
+  // never re-runs) sees the latest values every frame.
+  useEffect(() => { selectedTowerRef.current = selectedTower; }, [selectedTower]);
+  useEffect(() => { cursorWorldRef.current = cursorWorld; }, [cursorWorld]);
+  useEffect(() => { phaseRef.current = phase; }, [phase]);
+  useEffect(() => { inspectTowerRef.current = inspectTower; }, [inspectTower]);
+  useEffect(() => { hoveredTowerRef.current = hoveredTower; }, [hoveredTower]);
 
   // Phase 2.9 UX: when a tower is inspected, the player needs to
   // see the Inspector panel. With six panels in the right rail,
@@ -558,8 +582,10 @@ export function App() {
           // Base opacity: pulse subtly, brighten if hovered or
           // currently inspected, peak on both. Skipped entirely
           // under reducedMotion so the opt-out sees a static ring.
-          const isHovered = hoveredTower?.id === tower.id;
-          const isInspected = inspectTower?.id === tower.id;
+          // Phase 2.9: read from refs (not the closure-captured
+          // state) so the tick loop sees the latest values.
+          const isHovered = hoveredTowerRef.current?.id === tower.id;
+          const isInspected = inspectTowerRef.current?.id === tower.id;
           if (reducedMotion) {
             rec.material.opacity = isHovered || isInspected ? 0.95 : 0.7;
           } else {
@@ -886,7 +912,9 @@ export function App() {
     // Phase 2.6 UX: when a tower is selected, find the nearest build
     // zone to the cursor so we can highlight it as "where the click
     // will land". This gives instant feedback even before the user
-    // commits to a placement.
+    // commits to a placement. Phase 2.9: read from refs.
+    const selectedTower = selectedTowerRef.current;
+    const cursorWorld = cursorWorldRef.current;
     let nearestZoneIndex: number | null = null;
     if (selectedTower && cursorWorld) {
       let minDist = Number.POSITIVE_INFINITY;
@@ -1067,39 +1095,38 @@ export function App() {
 
       // Phase 2.9: the persistent base ring is rendered from
       // tick() so it can pulse + react to hover. The previous
-      // static per-frame ring is gone.
+      // static per-frame ring is gone. Read inspectTower from
+      // its ref so the closure-captured state doesn't make this
+      // branch permanently dead.
 
-      if (inspectTower?.id === tower.id) {
+      if (inspectTowerRef.current?.id === tower.id) {
         const range = towerConfig.upgrades[level - 1].range;
         const ring = new THREE.Mesh(
-          // TODO(Phase 2.9): the inspected-tower range ring
-          // rendering is being investigated. The original
-          // dark-navy (cInk) cylinder at y=0.05 was below
-          // the path top (y=0.055) and effectively clipped;
-          // subsequent attempts (CylinderGeometry at y=0.5,
-          // RingGeometry at y=0.2) created the ring meshes
-          // without errors but the ring never appears in
-          // screenshots. Suspected stale-closure on inspectTower
-          // inside the canvas-init useEffect's tick function
-          // (deps are [canvasEl, reducedMotion]). For now,
-          // restore the original dim ring so behavior is at
-          // least unchanged.
-          new THREE.CylinderGeometry(range, range, 0.02, 32, 1, true),
-          new THREE.MeshBasicMaterial({ color: cInk, transparent: true, opacity: 0.18, side: THREE.DoubleSide })
+          // Phase 2.9: with the closure fix in place, the
+          // inspected-tower range ring actually renders now.
+          // Switch to a tall semi-transparent amber cylinder
+          // (y=0.5, height 0.5) so the ring reads clearly from
+          // the top-down camera, well above the path top at
+          // y=0.055.
+          new THREE.CylinderGeometry(range, range, 0.5, 64, 1, true),
+          new THREE.MeshBasicMaterial({ color: cFlare2, transparent: true, opacity: 0.55, side: THREE.DoubleSide, depthWrite: false })
         );
-        ring.position.set(tower.x, 0.05, tower.z);
+        ring.position.set(tower.x, 0.5, tower.z);
         scene.rangeGroup.add(ring);
       }
     });
 
     // Phase 2.2: range ring for the currently selected tower, following the cursor.
-    if (selectedTower && cursorWorld && phase === "building") {
-      const range = selectedTower.upgrades[0].range;
+    // Phase 2.9: read from refs.
+    if (selectedTowerRef.current && cursorWorldRef.current && phaseRef.current === "building") {
+      const sel = selectedTowerRef.current;
+      const cur = cursorWorldRef.current;
+      const range = sel.upgrades[0].range;
       const ring = new THREE.Mesh(
         new THREE.CylinderGeometry(range, range, 0.02, 32, 1, true),
         new THREE.MeshBasicMaterial({ color: cFlare, transparent: true, opacity: 0.22, side: THREE.DoubleSide })
       );
-      ring.position.set(cursorWorld.x, 0.04, cursorWorld.z);
+      ring.position.set(cur.x, 0.04, cur.z);
       scene.rangeGroup.add(ring);
     }
 
