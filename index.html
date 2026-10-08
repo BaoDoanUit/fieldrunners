@@ -4,12 +4,32 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <meta name="theme-color" content="#f2ebdc" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <meta name="apple-mobile-web-app-title" content="FieldRunner" />
+    <meta name="application-name" content="FieldRunner Defense" />
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png" />
+    <link rel="icon" type="image/png" sizes="512x512" href="/icons/icon-512.png" />
+    <link rel="apple-touch-icon" href="/icons/icon-192.png" />
     <link rel="preload" href="/src/fonts/bungee-400.woff2" as="font" type="font/woff2" crossorigin />
     <link rel="preload" href="/src/fonts/spectral-400.woff2" as="font" type="font/woff2" crossorigin />
     <title>FieldRunner Defense</title>
+    <script>
+      // Register the service worker (cache-first for /assets, /fonts, /icons;
+      // network-first for /api/*). Phase 4.2 of the plan.
+      if ("serviceWorker" in navigator && location.protocol !== "file:") {
+        window.addEventListener("load", () => {
+          navigator.serviceWorker.register("/sw.js").catch((err) => {
+            console.warn("[FieldRunner] SW registration failed:", err);
+          });
+        });
+      }
+    </script>
   </head>
   <body>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
-  </html>
+</html>

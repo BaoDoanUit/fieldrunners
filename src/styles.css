@@ -938,6 +938,72 @@ button.is-pressed { transform: translate(1px, 1px); }
 .map-plate text { font-family: var(--font-display); }
 
 /* ---------------------------------------------------------------------------
+   Install hint (iOS Safari "Add to Home Screen" nudge)
+   --------------------------------------------------------------------------- */
+.install-hint {
+  position: fixed;
+  left: 12px;
+  right: 12px;
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 12px);
+  z-index: 60;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  background: var(--parchment);
+  color: var(--ink);
+  border: var(--hair) solid var(--ink);
+  border-radius: var(--radius-card);
+  box-shadow:
+    0 1px 0 var(--ink) inset,
+    0 0 0 4px var(--parchment) inset,
+    0 0 0 5px var(--ink) inset,
+    0 8px 22px rgba(20, 32, 46, 0.18);
+  animation: sheet-rise 280ms cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+.install-hint__stamp {
+  display: inline-block;
+  font-family: var(--font-mono);
+  font-size: var(--t-xxs);
+  text-transform: uppercase;
+  letter-spacing: 0.22em;
+  color: var(--ink);
+  border: var(--hair) solid var(--ink);
+  padding: 2px 6px;
+  margin-bottom: 4px;
+  background: var(--parchment-2);
+  display: inline-block;
+}
+.install-hint__body p {
+  margin: 0;
+  font-family: var(--font-body);
+  font-size: var(--t-sm);
+  line-height: 1.4;
+}
+.install-hint__body strong { font-weight: 600; }
+.install-hint__kbd {
+  display: inline-block;
+  font-family: var(--font-mono);
+  font-size: var(--t-xs);
+  padding: 1px 6px;
+  border: var(--hair) solid var(--ink);
+  border-radius: 3px;
+  background: var(--parchment-2);
+}
+.install-hint__close {
+  background: transparent;
+  border: 0;
+  font-size: 1.4rem;
+  line-height: 1;
+  color: var(--ink);
+  padding: 4px 10px;
+  text-transform: none;
+  letter-spacing: 0;
+}
+.install-hint__close:hover { background: var(--parchment-2); }
+
+/* ---------------------------------------------------------------------------
    Reduced motion
    --------------------------------------------------------------------------- */
 @media (prefers-reduced-motion: reduce) {
