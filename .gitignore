@@ -44,3 +44,4 @@ logs
 coverage
 .cache
 .parcel-cache
+.codegraph/codegraph.db
