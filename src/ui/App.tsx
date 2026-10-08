@@ -15,6 +15,7 @@ import { PauseSheet } from "./PauseSheet";
 import { SettingsScreen } from "./SettingsScreen";
 import { SoldConfirmSheet } from "./SoldConfirmSheet";
 import { Engine } from "../engine/Engine";
+import { VfxManager } from "../engine/vfx";
 
 const STORAGE_KEY = "fieldrunner-defense-save-v1";
 const defaultSave: SavedProgress = {
@@ -91,6 +92,7 @@ export function App() {
     const root = document.documentElement;
     if (reducedMotion) root.classList.add("reduced-motion");
     else root.classList.remove("reduced-motion");
+    vfxRef.current?.setReducedMotion(reducedMotion);
   }, [reducedMotion]);
 
   // Subscribe to OS-level reduced-motion changes. The SettingsScreen
@@ -138,7 +140,12 @@ export function App() {
     projectileGroup: THREE.Group;
     rangeGroup: THREE.Group;
     buildMarkerGroup: THREE.Group;
+    vfxGroup: THREE.Group;
   } | null>(null);
+  const vfxRef = useRef<VfxManager | null>(null);
+  // Phase 2.4: tracks the engine event subscription so beginRun can
+  // rebind VFX to a fresh engine.
+  const engineVfxOffRef = useRef<(() => void) | null>(null);
   const pausedRef = useRef(false);
 
   const currentRound = gameConfig.rounds[roundIndex];
@@ -198,6 +205,11 @@ export function App() {
     const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
     renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
     renderer.setSize(canvas.clientWidth, canvas.clientHeight, false);
+    // Phase 2.5: enable shadow maps. Soft PCF, tuned tight to the playfield.
+    renderer.shadowMap.enabled = true;
+    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    renderer.toneMappingExposure = 1.05;
 
     const scene = new THREE.Scene();
     scene.background = new THREE.Color("#08101d");
@@ -207,9 +219,21 @@ export function App() {
     camera.position.set(0, 17, 16);
     camera.lookAt(0, 0, 0);
 
-    const ambient = new THREE.AmbientLight(0xffffff, 1.6);
-    const directional = new THREE.DirectionalLight(0xffffff, 1.8);
+    const ambient = new THREE.AmbientLight(0xffffff, 1.4);
+    const directional = new THREE.DirectionalLight(0xfff1d8, 1.6);
     directional.position.set(7, 14, 10);
+    // Phase 2.5: directional light casts shadows over a 24×24 area
+    // that covers the playfield.
+    directional.castShadow = true;
+    directional.shadow.mapSize.set(1024, 1024);
+    directional.shadow.camera.near = 1;
+    directional.shadow.camera.far = 40;
+    directional.shadow.camera.left = -12;
+    directional.shadow.camera.right = 12;
+    directional.shadow.camera.top = 12;
+    directional.shadow.camera.bottom = -12;
+    directional.shadow.bias = -0.0005;
+    directional.shadow.normalBias = 0.02;
     scene.add(ambient, directional);
 
     const map = new THREE.Group();
@@ -218,13 +242,19 @@ export function App() {
     const projectileGroup = new THREE.Group();
     const rangeGroup = new THREE.Group();
     const buildMarkerGroup = new THREE.Group();
-    scene.add(map, towerGroup, enemyGroup, projectileGroup, rangeGroup, buildMarkerGroup);
+    // Phase 2.4: VFX group, owned by the VfxManager.
+    const vfxManager = new VfxManager(reducedMotion);
+    const vfxGroup = vfxManager.sceneGroup();
+    vfxRef.current = vfxManager;
+    scene.add(map, towerGroup, enemyGroup, projectileGroup, rangeGroup, buildMarkerGroup, vfxGroup);
 
     const ground = new THREE.Mesh(
       new THREE.PlaneGeometry(22, 20),
       new THREE.MeshStandardMaterial({ color: "#102036", roughness: 1 })
     );
     ground.rotation.x = -Math.PI / 2;
+    // Phase 2.5: ground receives tower shadows.
+    ground.receiveShadow = true;
     map.add(ground);
 
     const pathMaterial = new THREE.MeshStandardMaterial({ color: "#2d415f", roughness: 1 });
@@ -251,7 +281,23 @@ export function App() {
       buildMarkerGroup.add(pad);
     });
 
-    sceneRef.current = { renderer, scene, camera, map, towerGroup, enemyGroup, projectileGroup, rangeGroup, buildMarkerGroup };
+    sceneRef.current = { renderer, scene, camera, map, towerGroup, enemyGroup, projectileGroup, rangeGroup, buildMarkerGroup, vfxGroup };
+
+    // Phase 2.4: subscribe to engine events for VFX. We only do this
+    // once per engine instance; the VFX manager decides whether to
+    // actually emit (it is a no-op when reducedMotion is set).
+    const engineVfxOff = engineRef.current.on((ev) => {
+      const cfg = getTowerConfig;
+      if (ev.type === "fire") {
+        const tc = cfg(ev.towerKind as Parameters<typeof cfg>[0]);
+        vfxManager.spawn("trail", ev.x, ev.z, tc.color);
+        vfxManager.spawn("trail", ev.x, ev.z, tc.color, { life: 0.18 });
+      } else if (ev.type === "kill") {
+        const ec = getEnemyConfig(ev.enemyKind);
+        vfxManager.spawnBurst("death", ev.x, ev.z, ec.color, 12, { speed: 2.4, life: 0.85 });
+      }
+    });
+    engineVfxOffRef.current = engineVfxOff;
 
     const resize = () => {
       if (!canvas.parentElement) return;
@@ -266,24 +312,62 @@ export function App() {
     resizeObserver.observe(canvas.parentElement!);
     resize();
 
+    // Phase 2.5: camera parallax target follows the cursor with a
+    // gentle lerp. Reduced motion short-circuits the offset to 0.
+    const baseCamPos = camera.position.clone();
+    const baseTarget = new THREE.Vector3(0, 0, 0);
+    const lerpedTarget = new THREE.Vector3(0, 0, 0);
+
     const animate = (now: number) => {
       animationRef.current = requestAnimationFrame(animate);
       const dt = Math.min((now - lastTimeRef.current) / 1000, 0.033);
       lastTimeRef.current = now;
       if (!pausedRef.current) {
         stepEngine(dt);
+        vfxManager.tick(dt);
+      } else {
+        // Even while paused, drain any leftover VFX so they don't
+        // freeze on screen forever.
+        vfxManager.tick(dt * 0.5);
       }
+
+      // Phase 2.5: subtle camera parallax toward the cursor (or
+      // the selected tower, if any). Skipped when reducedMotion
+      // is on so a player who opted out sees a static camera.
+      if (!reducedMotion && cursorWorld) {
+        const targetX = clamp(cursorWorld.x * 0.05, -0.7, 0.7);
+        const targetZ = clamp(cursorWorld.z * 0.05, -0.7, 0.7);
+        lerpedTarget.x += (targetX - lerpedTarget.x) * Math.min(1, dt * 4);
+        lerpedTarget.z += (targetZ - lerpedTarget.z) * Math.min(1, dt * 4);
+        camera.position.set(baseCamPos.x + lerpedTarget.x, baseCamPos.y, baseCamPos.z + lerpedTarget.z);
+        camera.lookAt(baseTarget.x + lerpedTarget.x * 0.5, baseTarget.y, baseTarget.z + lerpedTarget.z * 0.5);
+      } else if (!reducedMotion) {
+        // Decay back to center when the cursor leaves the canvas.
+        lerpedTarget.x *= Math.max(0, 1 - dt * 3);
+        lerpedTarget.z *= Math.max(0, 1 - dt * 3);
+        camera.position.set(baseCamPos.x + lerpedTarget.x, baseCamPos.y, baseCamPos.z + lerpedTarget.z);
+        camera.lookAt(baseTarget.x + lerpedTarget.x * 0.5, baseTarget.y, baseTarget.z + lerpedTarget.z * 0.5);
+      } else {
+        camera.position.copy(baseCamPos);
+        camera.lookAt(baseTarget);
+      }
+
       syncScene();
+      vfxManager.render();
       renderer.render(scene, camera);
     };
     animationRef.current = requestAnimationFrame(animate);
 
     return () => {
+      engineVfxOff();
+      engineVfxOffRef.current = null;
+      vfxManager.clear();
+      vfxRef.current = null;
       resizeObserver.disconnect();
       if (animationRef.current) cancelAnimationFrame(animationRef.current);
       renderer.dispose();
     };
-  }, []);
+  }, [reducedMotion]);
 
   useEffect(() => {
     if (phase === "building") {
@@ -303,7 +387,25 @@ export function App() {
   }
 
   function beginRun(startRound = progress.unlockedRound) {
-    engineRef.current = new Engine("fieldrunner-default");
+    // Phase 2.4: detach VFX listener from the old engine before
+    // replacing it, then rebind to the fresh one.
+    engineVfxOffRef.current?.();
+    engineVfxOffRef.current = null;
+    vfxRef.current?.clear();
+    const fresh = new Engine("fieldrunner-default");
+    engineRef.current = fresh;
+    if (vfxRef.current) {
+      engineVfxOffRef.current = fresh.on((ev) => {
+        if (ev.type === "fire") {
+          const tc = getTowerConfig(ev.towerKind);
+          vfxRef.current?.spawn("trail", ev.x, ev.z, tc.color);
+          vfxRef.current?.spawn("trail", ev.x, ev.z, tc.color, { life: 0.18 });
+        } else if (ev.type === "kill") {
+          const ec = getEnemyConfig(ev.enemyKind);
+          vfxRef.current?.spawnBurst("death", ev.x, ev.z, ec.color, 12, { speed: 2.4, life: 0.85 });
+        }
+      });
+    }
     setRoundIndex(startRound - 1);
     setActiveRound(startRound);
     setCurrency(gameConfig.tuning.startingCurrency);
@@ -434,6 +536,12 @@ export function App() {
     setMessage("Tower upgraded.");
     pushTelemetry("tower_upgraded", { towerId });
     Sfx.play("ink-press");
+    // Phase 2.4: a quick radial spark ring on the upgraded tower.
+    const t = engineRef.current.getTower(towerId);
+    if (t && vfxRef.current) {
+      const towerConfig = getTowerConfig(t.kind);
+      vfxRef.current.spawn("upgrade", t.x, t.z, towerConfig.color, { ringRadius: 1.6 });
+    }
   }
 
   function sellTower(towerId: string) {
@@ -544,6 +652,8 @@ export function App() {
         })
       );
       mesh.position.set(tower.x, 0.55, tower.z);
+      // Phase 2.5: towers cast shadows.
+      mesh.castShadow = true;
       scene.towerGroup.add(mesh);
 
       if (inspectTower?.id === tower.id) {
