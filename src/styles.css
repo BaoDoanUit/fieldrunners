@@ -280,10 +280,18 @@ button, input, select, textarea { font: inherit; color: inherit; }
   height: 100%;
   display: block;
   touch-action: manipulation;
+  cursor: crosshair;
   background:
     repeating-linear-gradient(0deg, transparent 0 31px, rgba(244, 161, 58, 0.05) 31px 32px),
     repeating-linear-gradient(90deg, transparent 0 31px, rgba(244, 161, 58, 0.05) 31px 32px),
     linear-gradient(180deg, #0a1424 0%, #050a13 100%);
+}
+/* Phase 2.9: when no tower is selected, the canvas reverts to the
+   default cursor so the player knows they're not in placement
+   mode. When a tower IS selected we keep the crosshair as a
+   constant "you can place here" affordance. */
+.stage-card[data-tower-selected="false"] .stage-canvas {
+  cursor: default;
 }
 
 /* HUD overlay inside the stage */
@@ -433,10 +441,43 @@ button.primary {
   background: var(--flare);
   color: var(--parchment);
   border-color: var(--ink);
+  box-shadow: 0 0 0 1px var(--flare-2) inset, 0 2px 0 var(--ink);
 }
 .button-grid > button.primary:hover:not(:disabled) {
   background: var(--ink);
   color: var(--flare-2);
+  box-shadow: 0 0 0 1px var(--flare) inset;
+}
+.button-grid > button.primary:disabled {
+  background: rgba(225, 90, 28, 0.25);
+  color: rgba(242, 235, 220, 0.45);
+  border-color: rgba(29, 42, 58, 0.5);
+  box-shadow: none;
+  cursor: not-allowed;
+}
+.button-grid > button.primary:not(:disabled) {
+  animation: cta-pulse 2.4s ease-in-out infinite;
+}
+@keyframes cta-pulse {
+  0%, 100% { box-shadow: 0 0 0 1px var(--flare-2) inset, 0 2px 0 var(--ink), 0 0 0 0 rgba(225, 90, 28, 0.55); }
+  50%      { box-shadow: 0 0 0 1px var(--flare-2) inset, 0 2px 0 var(--ink), 0 0 0 6px rgba(225, 90, 28, 0); }
+}
+
+/* Phase 2.9: round-control layout. The Start Wave button spans
+   the full width on its own row so it reads as the obvious CTA;
+   the debug actions sit below in a compact three-column row. */
+.round-control-grid {
+  grid-template-columns: 1fr !important;
+}
+.round-control-grid .start-wave-btn {
+  font-size: var(--t-md);
+  padding: 14px 12px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.round-control-grid .round-debug {
+  margin-top: var(--s-2);
 }
 
 .button-grid {

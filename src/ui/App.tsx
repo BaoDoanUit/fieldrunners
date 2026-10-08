@@ -945,12 +945,41 @@ export function App() {
 
     engineRef.current.enemies.forEach((enemy) => {
       const enemyConfig = getEnemyConfig(enemy.kind);
-      const mesh = new THREE.Mesh(
-        new THREE.SphereGeometry(enemy.radius, 12, 12),
-        new THREE.MeshStandardMaterial({ color: enemyConfig.color, roughness: 0.5 })
+      // Phase 2.9 UX: enemies were 0.34-radius white spheres that
+      // vanished against the dark navy playfield. Bump the radius,
+      // switch to a darker shell with the enemy-type color as an
+      // emissive halo, and add a soft ground-shadow ring so the
+      // player can track them at a glance.
+      const radius = enemy.radius * 1.35;
+      const group = new THREE.Group();
+      const body = new THREE.Mesh(
+        new THREE.SphereGeometry(radius, 14, 14),
+        new THREE.MeshStandardMaterial({
+          color: enemyConfig.color,
+          emissive: enemyConfig.color,
+          emissiveIntensity: 0.7,
+          roughness: 0.4
+        })
       );
-      mesh.position.set(enemy.x, 0.38, enemy.z);
-      scene.enemyGroup.add(mesh);
+      body.position.y = 0.38;
+      body.castShadow = true;
+      group.add(body);
+      // A wide flat ring on the ground beneath the enemy — works
+      // as a selection ring and a "they're here" marker.
+      const groundRing = new THREE.Mesh(
+        new THREE.RingGeometry(radius * 1.4, radius * 1.9, 18),
+        new THREE.MeshBasicMaterial({
+          color: enemyConfig.color,
+          transparent: true,
+          opacity: 0.5,
+          side: THREE.DoubleSide
+        })
+      );
+      groundRing.rotation.x = -Math.PI / 2;
+      groundRing.position.y = 0.04;
+      group.add(groundRing);
+      group.position.set(enemy.x, 0, enemy.z);
+      scene.enemyGroup.add(group);
 
       const hpPct = clamp(enemy.hp / enemy.maxHp, 0, 1);
       // Phase 2.6 UX: HP bar color tracks the percentage so you can
@@ -958,24 +987,38 @@ export function App() {
       //   > 60% → green  (healthy)
       //   > 30% → yellow (wounded)
       //   ≤ 30% → red    (near death)
+      // Phase 2.9: also make the bar visibly bigger and float it
+      // higher above the enemy so it's not lost behind the body.
       const fillColor = hpPct > 0.6 ? "#22c55e" : hpPct > 0.3 ? "#eab308" : "#ef4444";
+      const BAR_W = 1.0;
+      const BAR_H = 0.1;
+      const barY = 1.0;
       const bar = new THREE.Mesh(
-        new THREE.BoxGeometry(0.7, 0.06, 0.06),
-        new THREE.MeshBasicMaterial({ color: "#334155" })
+        new THREE.BoxGeometry(BAR_W, BAR_H, BAR_H),
+        new THREE.MeshBasicMaterial({ color: "#0b1320" })
       );
-      bar.position.set(enemy.x, 1.0, enemy.z);
+      bar.position.set(enemy.x, barY, enemy.z);
+      scene.enemyGroup.add(bar);
       const fill = new THREE.Mesh(
-        new THREE.BoxGeometry(0.7 * hpPct, 0.06, 0.06),
+        new THREE.BoxGeometry(BAR_W * hpPct, BAR_H, BAR_H),
         new THREE.MeshBasicMaterial({ color: fillColor })
       );
-      fill.position.set(enemy.x - (0.7 * (1 - hpPct)) / 2, 1.0, enemy.z);
-      scene.enemyGroup.add(bar, fill);
+      fill.position.set(enemy.x - (BAR_W * (1 - hpPct)) / 2, barY, enemy.z);
+      scene.enemyGroup.add(fill);
     });
 
     engineRef.current.projectiles.forEach((projectile) => {
+      // Phase 2.9 UX: projectiles were 0.08-radius specks — invisible
+      // from the playfield camera. Bigger, brighter, with an
+      // emissive trail so the player sees the tower firing.
       const mesh = new THREE.Mesh(
-        new THREE.SphereGeometry(0.08, 10, 10),
-        new THREE.MeshStandardMaterial({ color: projectile.color, emissive: projectile.color, emissiveIntensity: 0.8 })
+        new THREE.SphereGeometry(0.18, 12, 12),
+        new THREE.MeshStandardMaterial({
+          color: projectile.color,
+          emissive: projectile.color,
+          emissiveIntensity: 1.4,
+          roughness: 0.2
+        })
       );
       mesh.position.set(projectile.x, 0.7, projectile.z);
       scene.projectileGroup.add(mesh);
@@ -1093,7 +1136,11 @@ export function App() {
       </header>
 
       <main className="layout">
-        <section className="stage-card">
+        <section
+          className="stage-card"
+          data-tower-selected={selectedTower ? "true" : "false"}
+          data-phase={phase}
+        >
           <div className="stage-frame">
             <canvas
               ref={setCanvasEl}
@@ -1141,7 +1188,18 @@ export function App() {
               <div className="hud-subrow">
                 <span>{towerCount} towers built</span>
                 <span>Unlocked round {unlockedRound}</span>
-                <span>{currentRound ? `${currentRound.spawns.length} wave groups` : "Ready"}</span>
+                {phase === "combat" ? (
+                  // Phase 2.9: live wave progress — how many enemies
+                  // remain out of the total this round. The total
+                  // includes every spawn across every group.
+                  <span>
+                    Wave {currentRound
+                      ? `${Math.max(0, engineRef.current.enemies.length)} / ${currentRound.spawns.reduce((s, g) => s + g.count, 0)}`
+                      : ""}
+                  </span>
+                ) : (
+                  <span>{currentRound ? `${currentRound.spawns.length} wave groups` : "Ready"}</span>
+                )}
               </div>
             </div>
           </div>
@@ -1228,11 +1286,24 @@ export function App() {
 
           <section className="panel-block">
             <div className="panel-title">Round Control</div>
-            <div className="button-grid">
-              <button disabled={!readyToStart} onClick={startWave}>Start Wave</button>
-              <button onClick={() => setCurrency((value) => value + 250)}>Add Cash</button>
-              <button onClick={() => spawnDebugEnemy("basic")}>Spawn Basic</button>
-              <button onClick={() => spawnDebugEnemy("boss")}>Spawn Boss</button>
+            {/* Phase 2.9 UX: Start Wave is the primary action — it
+                needs to read as the obvious CTA so the player knows
+                exactly what to do once they've placed towers. The
+                secondary debug actions (Add Cash, Spawn Basic, Spawn
+                Boss) sit below it, visually de-emphasized. */}
+            <div className="button-grid round-control-grid">
+              <button
+                className="primary start-wave-btn"
+                disabled={!readyToStart}
+                onClick={startWave}
+              >
+                ▶ Start Wave
+              </button>
+              <div className="button-grid compact round-debug">
+                <button onClick={() => setCurrency((value) => value + 250)}>Add Cash</button>
+                <button onClick={() => spawnDebugEnemy("basic")}>Spawn Basic</button>
+                <button onClick={() => spawnDebugEnemy("boss")}>Spawn Boss</button>
+              </div>
             </div>
             <p className="helper">Debug controls are intended for tuning balance and checking edge cases quickly.</p>
           </section>
