@@ -46,3 +46,8 @@ coverage
 .parcel-cache
 .codegraph/codegraph.db
 preview.html
+
+# playwright
+test-results
+playwright-report
+playwright/.cache

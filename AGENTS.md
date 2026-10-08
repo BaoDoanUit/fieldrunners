@@ -89,6 +89,9 @@ npm run docker:down        # stop + remove the prod container
 npm run docker:logs        # tail logs of the prod container
 npm run docker:dev:up      # dev stack: Vite (:5173) + server (:3001) with watch
 npm run docker:dev:down    # stop the dev stack
+
+# Playwright (drives the live game in a real browser; requires `npm run dev` running)
+npm run play:round-1       # headed, slowMo 250ms; opens Chromium, plays Round 1, screenshots → test-results/round-1/
 ```
 
 The production image is multi-stage (Node 22). In `NODE_ENV=production`,

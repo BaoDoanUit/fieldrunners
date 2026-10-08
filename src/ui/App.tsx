@@ -110,7 +110,13 @@ export function App() {
   const [worldEventCount, setWorldEventCount] = useState<{ placement: number; wave_started: number }>({ placement: 0, wave_started: 0 });
 
   const socketRef = useRef<Socket | null>(null);
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  // Phase 2.6 bug fix: the canvas is only mounted when phase is
+  // "building" / "combat" (HomeMenu / PauseSheet / etc. take over the
+  // screen otherwise). A plain useRef would be null on first mount
+  // and the Three.js init effect would no-op forever. A callback ref
+  // (via useState) gives us a re-render trigger when the canvas
+  // actually appears, so the effect can re-run and pick it up.
+  const [canvasEl, setCanvasEl] = useState<HTMLCanvasElement | null>(null);
   const animationRef = useRef<number | null>(null);
   const lastTimeRef = useRef<number>(0);
   const engineRef = useRef(new Engine("fieldrunner-default"));
@@ -220,11 +226,23 @@ export function App() {
   }, [progress.settings.music, phase]);
 
   useEffect(() => {
-    if (!canvasRef.current) return;
-    const canvas = canvasRef.current;
-    const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
+    if (!canvasEl) return;
+    const canvas = canvasEl;
+    // Phase 2.6: no `alpha: true`. With alpha enabled the WebGL
+    // framebuffer stays at alpha=0 until the scene actively paints;
+    // if the animate loop is throttled (e.g. tab not focused) the
+    // CSS background bleeds through. Opaque canvas + explicit clear
+    // color = the playfield is always filled, even between frames.
+    const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
     renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
-    renderer.setSize(canvas.clientWidth, canvas.clientHeight, false);
+    // Guard: if the layout hasn't settled yet, defer sizing the
+    // renderer until the next frame. Without this, an early mount
+    // can produce a 0×0 or inflated buffer and the scene paints
+    // nothing.
+    const initialW = canvas.clientWidth;
+    const initialH = canvas.clientHeight;
+    renderer.setSize(initialW || 1, initialH || 1, false);
+    renderer.setClearColor("#08101d", 1.0);
     // Phase 2.5: enable shadow maps. Soft PCF, tuned tight to the playfield.
     renderer.shadowMap.enabled = true;
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
@@ -235,7 +253,7 @@ export function App() {
     scene.background = new THREE.Color("#08101d");
     scene.fog = new THREE.Fog("#08101d", 18, 38);
 
-    const camera = new THREE.PerspectiveCamera(40, canvas.clientWidth / canvas.clientHeight, 0.1, 100);
+    const camera = new THREE.PerspectiveCamera(40, (initialW || 1) / (initialH || 1), 0.1, 100);
     camera.position.set(0, 17, 16);
     camera.lookAt(0, 0, 0);
 
@@ -323,6 +341,9 @@ export function App() {
       if (!canvas.parentElement) return;
       const width = canvas.parentElement.clientWidth;
       const height = canvas.parentElement.clientHeight;
+      // Skip zero-size frames (layout not yet settled). The
+      // ResizeObserver will call us again on the next layout change.
+      if (width === 0 || height === 0) return;
       renderer.setSize(width, height, false);
       camera.aspect = width / height;
       camera.updateProjectionMatrix();
@@ -330,7 +351,10 @@ export function App() {
 
     const resizeObserver = new ResizeObserver(resize);
     resizeObserver.observe(canvas.parentElement!);
-    resize();
+    // Defer the first resize to the next frame so the responsive
+    // grid has actually settled to its final size before we sample
+    // the canvas's clientWidth/clientHeight.
+    requestAnimationFrame(resize);
 
     // Phase 2.5: camera parallax target follows the cursor with a
     // gentle lerp. Reduced motion short-circuits the offset to 0.
@@ -338,8 +362,13 @@ export function App() {
     const baseTarget = new THREE.Vector3(0, 0, 0);
     const lerpedTarget = new THREE.Vector3(0, 0, 0);
 
-    const animate = (now: number) => {
-      animationRef.current = requestAnimationFrame(animate);
+    // Phase 2.6: extract the per-frame work so it can be called
+    // from either requestAnimationFrame (when the tab is visible)
+    // or a setInterval fallback (when rAF is throttled because the
+    // tab is hidden). The fallback keeps the engine ticking so
+    // observation tests don't stall when the browser window is
+    // behind another window.
+    const tick = (now: number) => {
       const dt = Math.min((now - lastTimeRef.current) / 1000, 0.033);
       lastTimeRef.current = now;
       if (!pausedRef.current) {
@@ -376,7 +405,32 @@ export function App() {
       vfxManager.render();
       renderer.render(scene, camera);
     };
+
+    // Phase 2.6: hybrid rAF + setInterval safety net.
+    //
+    // requestAnimationFrame is throttled (often to 1 Hz) when the
+    // browser tab isn't the user's active focus — which can happen
+    // during Playwright observation runs and during normal
+    // window-switching. We track when rAF last fired; a 100 ms
+    // setInterval checks that timestamp and ticks the simulation
+    // only if rAF hasn't fired recently. This means:
+    //   - rAF drives the loop at full rate when the tab is focused
+    //   - setInterval takes over at 10 fps when rAF is throttled
+    //   - the two never double-tick (the guard skips setInterval
+    //     whenever rAF is keeping up)
+    let lastRafTime = 0;
+    const animate = (now: number) => {
+      lastRafTime = now;
+      animationRef.current = requestAnimationFrame(animate);
+      tick(now);
+    };
     animationRef.current = requestAnimationFrame(animate);
+
+    const safetyIntervalId = setInterval(() => {
+      const now = performance.now();
+      if (now - lastRafTime < 80) return;
+      tick(now);
+    }, 100);
 
     return () => {
       engineVfxOff();
@@ -385,9 +439,10 @@ export function App() {
       vfxRef.current = null;
       resizeObserver.disconnect();
       if (animationRef.current) cancelAnimationFrame(animationRef.current);
+      clearInterval(safetyIntervalId);
       renderer.dispose();
     };
-  }, [reducedMotion]);
+  }, [canvasEl, reducedMotion]);
 
   useEffect(() => {
     if (phase === "building") {
@@ -630,16 +685,46 @@ export function App() {
     const scene = sceneRef.current;
     if (!scene) return;
 
+    // Phase 2.6 UX: when a tower is selected, find the nearest build
+    // zone to the cursor so we can highlight it as "where the click
+    // will land". This gives instant feedback even before the user
+    // commits to a placement.
+    let nearestZoneIndex: number | null = null;
+    if (selectedTower && cursorWorld) {
+      let minDist = Number.POSITIVE_INFINITY;
+      gameConfig.buildZones.forEach((zone, index) => {
+        const d = distance2D(cursorWorld.x, cursorWorld.z, zone.x, zone.z);
+        if (d < minDist) {
+          minDist = d;
+          nearestZoneIndex = index;
+        }
+      });
+    }
+
     scene.buildMarkerGroup.children.forEach((child, index) => {
       const zone = gameConfig.buildZones[index];
       const occupied = engineRef.current.hasTowerNear(zone.x, zone.z);
       const material = (child as THREE.Mesh).material as THREE.MeshStandardMaterial;
       if (selectedTower) {
-        material.color.set(occupied ? "#ef4444" : "#22c55e");
-        material.opacity = occupied ? 0.32 : 0.7;
+        const isNearest = nearestZoneIndex === index;
+        if (occupied) {
+          // Hard "no" — zone is taken.
+          material.color.set("#ef4444");
+          material.opacity = 0.4;
+        } else if (isNearest) {
+          // Hover target — the click will land here.
+          material.color.set("#7dd3fc");
+          material.opacity = 0.95;
+        } else {
+          // Available but not the hover target.
+          material.color.set("#22c55e");
+          material.opacity = 0.55;
+        }
       } else {
-        material.color.set("#14324c");
-        material.opacity = 0.85;
+        // Resting state — make zones clearly visible so the player
+        // can see the buildable area at a glance.
+        material.color.set("#2c5d8a");
+        material.opacity = 0.7;
       }
     });
 
@@ -663,18 +748,38 @@ export function App() {
     engineRef.current.towers.forEach((tower) => {
       const towerConfig = getTowerConfig(tower.kind);
       const level = (tower.level as 1 | 2 | 3);
+      // Phase 2.6 UX: each tower now wears its own type color as an
+      // emissive glow (cannon=orange, rapid=green, splash=blue,
+      // slow=purple) and gets a flat colored ring on the ground under
+      // it, so a freshly placed tower is impossible to miss on the
+      // dark navy playfield.
       const mesh = new THREE.Mesh(
         new THREE.CylinderGeometry(0.4, 0.55, 1.1 + (level - 1) * 0.05, 8),
         new THREE.MeshStandardMaterial({
           color: TOWER_BODY[level],
-          emissive: TOWER_RIM[level],
-          emissiveIntensity: 0.18
+          emissive: towerConfig.color,
+          emissiveIntensity: 0.55
         })
       );
       mesh.position.set(tower.x, 0.55, tower.z);
       // Phase 2.5: towers cast shadows.
       mesh.castShadow = true;
       scene.towerGroup.add(mesh);
+
+      // Bright base ring lying flat on the ground — a per-tower
+      // "stand" that makes placement obvious from any camera angle.
+      const baseRing = new THREE.Mesh(
+        new THREE.RingGeometry(0.62, 0.88, 24),
+        new THREE.MeshBasicMaterial({
+          color: towerConfig.color,
+          transparent: true,
+          opacity: 0.7,
+          side: THREE.DoubleSide
+        })
+      );
+      baseRing.rotation.x = -Math.PI / 2;
+      baseRing.position.set(tower.x, 0.045, tower.z);
+      scene.towerGroup.add(baseRing);
 
       if (inspectTower?.id === tower.id) {
         const range = towerConfig.upgrades[level - 1].range;
@@ -708,6 +813,12 @@ export function App() {
       scene.enemyGroup.add(mesh);
 
       const hpPct = clamp(enemy.hp / enemy.maxHp, 0, 1);
+      // Phase 2.6 UX: HP bar color tracks the percentage so you can
+      // tell at a glance which enemies are about to die.
+      //   > 60% → green  (healthy)
+      //   > 30% → yellow (wounded)
+      //   ≤ 30% → red    (near death)
+      const fillColor = hpPct > 0.6 ? "#22c55e" : hpPct > 0.3 ? "#eab308" : "#ef4444";
       const bar = new THREE.Mesh(
         new THREE.BoxGeometry(0.7, 0.06, 0.06),
         new THREE.MeshBasicMaterial({ color: "#334155" })
@@ -715,7 +826,7 @@ export function App() {
       bar.position.set(enemy.x, 1.0, enemy.z);
       const fill = new THREE.Mesh(
         new THREE.BoxGeometry(0.7 * hpPct, 0.06, 0.06),
-        new THREE.MeshBasicMaterial({ color: "#22c55e" })
+        new THREE.MeshBasicMaterial({ color: fillColor })
       );
       fill.position.set(enemy.x - (0.7 * (1 - hpPct)) / 2, 1.0, enemy.z);
       scene.enemyGroup.add(bar, fill);
@@ -845,7 +956,7 @@ export function App() {
         <section className="stage-card">
           <div className="stage-frame">
             <canvas
-              ref={canvasRef}
+              ref={setCanvasEl}
               className="stage-canvas"
               onPointerMove={(event) => {
                 const rect = event.currentTarget.getBoundingClientRect();

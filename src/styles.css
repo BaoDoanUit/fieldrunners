@@ -234,14 +234,19 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .layout {
   display: grid;
   grid-template-columns: 1fr;
-  grid-template-rows: minmax(280px, 1fr) auto;
+  /* Mobile: stage on top (bounded), panel below. minmax keeps a
+     comfortable minimum on tiny phones and an upper bound on tall
+     viewports so the canvas never grows past the visible area. */
+  grid-template-rows: minmax(320px, 56vh) auto;
   gap: var(--s-3);
   min-height: 0;
 }
 @media (min-width: 1100px) {
   .layout {
     grid-template-columns: minmax(0, 1.7fr) minmax(320px, 0.9fr);
-    grid-template-rows: 1fr;
+    /* Desktop: single row, height bounded by the viewport minus the
+       topbar + footer + gaps so the canvas never overflows. */
+    grid-template-rows: minmax(360px, calc(100vh - 200px));
   }
 }
 
@@ -254,7 +259,11 @@ button, input, select, textarea { font: inherit; color: inherit; }
   border: var(--hair) solid var(--ink);
   border-radius: var(--radius-card);
   overflow: hidden;
-  min-height: 56vh;
+  /* Fill the grid cell (which is now bounded). Without `height: 100%`
+     the card's intrinsic height collides with the canvas's HTML
+     width/height attributes and balloons the page. */
+  height: 100%;
+  min-height: 320px;
   /* Mechanical drafting frame */
   outline: var(--hair) solid var(--topo-rule);
   outline-offset: 6px;
@@ -264,7 +273,6 @@ button, input, select, textarea { font: inherit; color: inherit; }
   position: relative;
   width: 100%;
   height: 100%;
-  min-height: 56vh;
 }
 
 .stage-canvas {
@@ -1110,6 +1118,7 @@ html.reduced-motion *::after {
    --------------------------------------------------------------------------- */
 @media (min-width: 1100px) {
   .topbar h1 { font-size: var(--t-xl); }
-  .stage-card { min-height: 78vh; }
-  .stage-frame, .stage-canvas { min-height: 78vh; }
+  /* The layout's grid-template-rows already caps the stage height at
+     calc(100vh - 200px). We let the card fill its grid cell so the
+     canvas always matches the visible viewport. */
 }
