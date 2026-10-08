@@ -7,6 +7,7 @@ import { Sfx } from "../audio/Sfx";
 import { CardstockSheet } from "./CardstockSheet";
 import { HomeMenu } from "./HomeMenu";
 import { MapPlate } from "./MapPlate";
+import { Engine } from "../engine/Engine";
 
 const STORAGE_KEY = "fieldrunner-defense-save-v1";
 const defaultSave: SavedProgress = {
@@ -54,6 +55,9 @@ export function App() {
   const [score, setScore] = useState(0);
   const [selectedTower, setSelectedTower] = useState<TowerConfig | null>(null);
   const [inspectTower, setInspectTower] = useState<PlacedTower | null>(null);
+  // Cursor world position; null when the pointer is not over the stage.
+  // Drives the in-canvas range ring for the currently selected tower.
+  const [cursorWorld, setCursorWorld] = useState<{ x: number; z: number } | null>(null);
   const [message, setMessage] = useState("Tap Play to begin Round 1.");
   const [towerCount, setTowerCount] = useState(0);
   const [activeRound, setActiveRound] = useState(1);
@@ -69,7 +73,23 @@ export function App() {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const animationRef = useRef<number | null>(null);
   const lastTimeRef = useRef<number>(0);
-  const engineRef = useRef(createEngine());
+  const engineRef = useRef(new Engine("fieldrunner-default"));
+
+  // Phase 2.1: wire the engine's event hook to SFX so each fire / kill /
+  // leak plays the right cue without changing gameplay logic.
+  useEffect(() => {
+    const engine = engineRef.current;
+    return engine.on((e) => {
+      switch (e.type) {
+        case "fire":    Sfx.play(`fire-${e.towerKind}`); break;
+        case "kill":    Sfx.play("enemy-killed"); break;
+        case "leak":    /* subtle — no cue in MVP */ break;
+        case "roundClear": Sfx.play("round-cleared"); break;
+        case "victory": Sfx.play("victory"); break;
+        case "defeat":  Sfx.play("defeat"); break;
+      }
+    });
+  }, []);
   const sceneRef = useRef<{
     renderer: THREE.WebGLRenderer;
     scene: THREE.Scene;
@@ -236,7 +256,7 @@ export function App() {
   }
 
   function beginRun(startRound = progress.unlockedRound) {
-    engineRef.current = createEngine();
+    engineRef.current = new Engine("fieldrunner-default");
     setRoundIndex(startRound - 1);
     setActiveRound(startRound);
     setCurrency(120);
@@ -360,13 +380,17 @@ export function App() {
   }
 
   function stepEngine(dt: number) {
-    const result = engineRef.current.tick(dt);
-    if (result.currencyDelta) setCurrency((value) => value + result.currencyDelta);
-    if (result.scoreDelta) setScore((value) => value + result.scoreDelta);
-    if (result.livesDelta) setLives((value) => value + result.livesDelta);
-    if (result.enemyKilled) pushTelemetry("enemy_killed", { kind: result.enemyKilled });
-    if (result.enemyEscaped) pushTelemetry("enemy_escaped", { kind: result.enemyEscaped });
-    const roundComplete = result.roundComplete;
+    const eng = engineRef.current;
+    eng.tick(dt);
+    const currencyDelta = eng.currencyDelta();
+    const scoreDelta = eng.scoreDelta();
+    const livesDelta = eng.livesDelta();
+    if (currencyDelta) setCurrency((value) => value + currencyDelta);
+    if (scoreDelta) setScore((value) => value + scoreDelta);
+    if (livesDelta) setLives((value) => value + livesDelta);
+    if (eng.enemyKilled()) pushTelemetry("enemy_killed", { kind: eng.enemyKilled()! });
+    if (eng.enemyEscaped()) pushTelemetry("enemy_escaped", { kind: eng.enemyEscaped()! });
+    const roundComplete = eng.roundComplete();
     if (roundComplete) {
       setRoundSummary(roundComplete);
       setProgress((prev) => ({
@@ -384,7 +408,7 @@ export function App() {
         Sfx.play("round-cleared");
       }
     }
-    if (lives + result.livesDelta <= 0) handleDefeat();
+    if (lives + livesDelta <= 0) handleDefeat();
   }
 
   function syncScene() {
@@ -409,26 +433,53 @@ export function App() {
     while (scene.projectileGroup.children.length) scene.projectileGroup.remove(scene.projectileGroup.children[0]);
     while (scene.rangeGroup.children.length) scene.rangeGroup.remove(scene.rangeGroup.children[0]);
 
+    // Pull rim colours from the design system so the 3D scene stays in sync with CSS.
+    const css = getComputedStyle(document.documentElement);
+    const cInk       = css.getPropertyValue("--ink").trim()       || "#14202e";
+    const cTopo2     = css.getPropertyValue("--topo-2").trim()     || "#14223a";
+    const cTopo      = css.getPropertyValue("--topo").trim()      || "#0e1b2c";
+    const cFlare     = css.getPropertyValue("--flare").trim()     || "#e15a1c";
+    const cFlare2    = css.getPropertyValue("--flare-2").trim()    || "#f4a13a";
+    const cVerdigris = css.getPropertyValue("--verdigris").trim() || "#2c7a6a";
+    // Phase 2.3: tower level visual states
+    const TOWER_BODY: Record<1 | 2 | 3, string> = { 1: cInk, 2: cTopo2, 3: cTopo };
+    const TOWER_RIM:  Record<1 | 2 | 3, string> = { 1: cFlare2, 2: cFlare, 3: cVerdigris };
+
     engineRef.current.towers.forEach((tower) => {
       const towerConfig = getTowerConfig(tower.kind);
-      const level = tower.level - 1;
+      const level = (tower.level as 1 | 2 | 3);
       const mesh = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.4, 0.55, 1.1 + level * 0.05, 8),
-        new THREE.MeshStandardMaterial({ color: towerConfig.color, emissive: towerConfig.color, emissiveIntensity: 0.18 })
+        new THREE.CylinderGeometry(0.4, 0.55, 1.1 + (level - 1) * 0.05, 8),
+        new THREE.MeshStandardMaterial({
+          color: TOWER_BODY[level],
+          emissive: TOWER_RIM[level],
+          emissiveIntensity: 0.18
+        })
       );
       mesh.position.set(tower.x, 0.55, tower.z);
       scene.towerGroup.add(mesh);
 
       if (inspectTower?.id === tower.id) {
-        const range = towerConfig.upgrades[level].range;
+        const range = towerConfig.upgrades[level - 1].range;
         const ring = new THREE.Mesh(
           new THREE.CylinderGeometry(range, range, 0.02, 32, 1, true),
-          new THREE.MeshBasicMaterial({ color: "#f8fafc", transparent: true, opacity: 0.12, side: THREE.DoubleSide })
+          new THREE.MeshBasicMaterial({ color: cInk, transparent: true, opacity: 0.18, side: THREE.DoubleSide })
         );
         ring.position.set(tower.x, 0.05, tower.z);
         scene.rangeGroup.add(ring);
       }
     });
+
+    // Phase 2.2: range ring for the currently selected tower, following the cursor.
+    if (selectedTower && cursorWorld && phase === "building") {
+      const range = selectedTower.upgrades[0].range;
+      const ring = new THREE.Mesh(
+        new THREE.CylinderGeometry(range, range, 0.02, 32, 1, true),
+        new THREE.MeshBasicMaterial({ color: cFlare, transparent: true, opacity: 0.22, side: THREE.DoubleSide })
+      );
+      ring.position.set(cursorWorld.x, 0.04, cursorWorld.z);
+      scene.rangeGroup.add(ring);
+    }
 
     engineRef.current.enemies.forEach((enemy) => {
       const enemyConfig = getEnemyConfig(enemy.kind);
@@ -522,6 +573,15 @@ export function App() {
             <canvas
               ref={canvasRef}
               className="stage-canvas"
+              onPointerMove={(event) => {
+                const rect = event.currentTarget.getBoundingClientRect();
+                const x = (event.clientX - rect.left) / rect.width;
+                const z = (event.clientY - rect.top) / rect.height;
+                const worldX = clamp((x - 0.5) * 18, -9, 9);
+                const worldZ = clamp((0.5 - z) * 16, -8, 8);
+                setCursorWorld({ x: worldX, z: worldZ });
+              }}
+              onPointerLeave={() => setCursorWorld(null)}
               onPointerDown={(event) => {
                 const rect = event.currentTarget.getBoundingClientRect();
                 const x = (event.clientX - rect.left) / rect.width;
@@ -902,7 +962,6 @@ function createEngine() {
         const pos = pathPosition(enemy.progress);
         enemy.x = pos.x;
         enemy.z = pos.z;
-        enemy.pathIndex = pos.segment;
         enemy.slowMultiplier = Math.min(1, enemy.slowMultiplier + dt * 0.35);
         if (enemy.progress >= 1) {
           enemy.alive = false;
@@ -1000,7 +1059,6 @@ function createEngine() {
       hp: config.hp + bonusHp,
       maxHp: config.hp + bonusHp,
       speed: config.speed + bonusSpeed,
-      pathIndex: 0,
       progress: 0,
       slowMultiplier: 1,
       x: pos.x,

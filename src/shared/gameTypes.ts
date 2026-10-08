@@ -26,7 +26,6 @@ export interface EnemyInstance {
   hp: number;
   maxHp: number;
   speed: number;
-  pathIndex: number;
   progress: number;
   slowMultiplier: number;
   x: number;
