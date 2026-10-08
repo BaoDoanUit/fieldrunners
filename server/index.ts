@@ -2,6 +2,8 @@ import cors from "cors";
 import express, { type Request, type Response, type NextFunction } from "express";
 import morgan from "morgan";
 import http from "http";
+import path from "node:path";
+import { existsSync } from "node:fs";
 import { Server } from "socket.io";
 import rateLimit from "express-rate-limit";
 import { gameConfig } from "../src/shared/gameConfig";
@@ -152,6 +154,36 @@ process.on("SIGTERM", () => {
   telemetry.stop();
   process.exit(0);
 });
+
+// In production we also serve the built Vite client (dist/) so a single
+// container can host both the API and the static SPA. The static middleware
+// and the SPA fallback are mounted AFTER the API + socket.io routes so
+// those keep their original behavior.
+if (process.env.NODE_ENV === "production") {
+  const clientDir = path.resolve(process.cwd(), "dist");
+  if (existsSync(clientDir)) {
+    app.use(
+      express.static(clientDir, {
+        index: "index.html",
+        maxAge: "1h",
+        setHeaders(res, file) {
+          if (file.endsWith(".html")) {
+            res.setHeader("Cache-Control", "no-cache");
+          }
+        }
+      })
+    );
+    // SPA fallback: serve index.html for any GET that isn't /api/* or /socket.io/*.
+    app.get(/^(?!\/(?:api|socket\.io)\/).*/, (_req, res) => {
+      res.sendFile(path.join(clientDir, "index.html"));
+    });
+    // eslint-disable-next-line no-console
+    console.log(`[static] serving client from ${clientDir}`);
+  } else {
+    // eslint-disable-next-line no-console
+    console.warn(`[static] dist/ not found at ${clientDir}; client not served`);
+  }
+}
 
 // 404 + error handler must come last.
 app.use(notFoundHandler);

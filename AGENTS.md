@@ -81,7 +81,28 @@ npm test             # vitest run (77 tests across 9 files)
 npm run test:watch   # vitest --watch
 npm run preview      # serve dist/ for a local smoke
 bash scripts/review.sh  # full audit: typecheck + tests + build + server smoke
+
+# Docker
+npm run docker:build       # build fieldrunner:local image
+npm run docker:up          # docker compose up --build (prod, port 3001)
+npm run docker:down        # stop + remove the prod container
+npm run docker:logs        # tail logs of the prod container
+npm run docker:dev:up      # dev stack: Vite (:5173) + server (:3001) with watch
+npm run docker:dev:down    # stop the dev stack
 ```
+
+The production image is multi-stage (Node 22). In `NODE_ENV=production`,
+`server/index.ts` also serves `dist/` and falls back to `index.html` for
+SPA routes, so a single container exposes the whole app on `:3001`. The
+server itself runs directly from `.ts` via `tsx` (no separate tsc emit).
+
+## Out of scope
+
+- No CI. Tests run locally only.
+- No deploy target. The repo is intended to run locally — Docker is provided
+  as a packaging option, not a hosted runtime.
+- No persistence on the server. Leaderboard is in-memory.
+- Native iOS shell (Capacitor) is not wired — PWA + iOS install hint only.
 
 ## Out of scope
 
