@@ -253,7 +253,7 @@ export const gameConfig: GameConfig = {
   }),
   tuning: {
     startingLives: 20,
-    startingCurrency: 120,
+    startingCurrency: 240,
     maxLives: 30,
     maxUpgradeLevel: 3,
     bossHpMultiplier: 1.0,

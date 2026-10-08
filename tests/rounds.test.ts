@@ -72,9 +72,13 @@ describe("gameConfig — milestone overrides", () => {
 });
 
 describe("gameConfig — tuning block", () => {
-  it("startingLives is 20, startingCurrency is 120", () => {
+  it("startingLives is 20, startingCurrency is 240", () => {
+    // Phase 2.9 balance: bumped from 120 to 240 so 2 towers fit
+    // in a single opener (cannon 80 + cannon 80 = 160, leaves
+    // 80 for an upgrade or a third tower). The test now asserts
+    // the doubled value so we don't accidentally regress.
     expect(gameConfig.tuning.startingLives).toBe(20);
-    expect(gameConfig.tuning.startingCurrency).toBe(120);
+    expect(gameConfig.tuning.startingCurrency).toBe(240);
   });
 
   it("maxLives is at least startingLives + livesBonus", () => {
