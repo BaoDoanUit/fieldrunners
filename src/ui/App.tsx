@@ -1458,7 +1458,9 @@ export function App() {
                 needs to read as the obvious CTA so the player knows
                 exactly what to do once they've placed towers. The
                 secondary debug actions (Add Cash, Spawn Basic, Spawn
-                Boss) sit below it, visually de-emphasized. */}
+                Boss) sit below it, visually de-emphasized, AND are
+                hidden during combat so the player can't accidentally
+                spawn a boss mid-wave or warp the balance. */}
             <div className="button-grid round-control-grid">
               <button
                 className="primary start-wave-btn"
@@ -1467,13 +1469,17 @@ export function App() {
               >
                 ▶ Start Wave
               </button>
-              <div className="button-grid compact round-debug">
-                <button onClick={() => setCurrency((value) => value + 250)}>Add Cash</button>
-                <button onClick={() => spawnDebugEnemy("basic")}>Spawn Basic</button>
-                <button onClick={() => spawnDebugEnemy("boss")}>Spawn Boss</button>
-              </div>
+              {phase === "building" && (
+                <>
+                  <div className="button-grid compact round-debug">
+                    <button onClick={() => setCurrency((value) => value + 250)}>Add Cash</button>
+                    <button onClick={() => spawnDebugEnemy("basic")}>Spawn Basic</button>
+                    <button onClick={() => spawnDebugEnemy("boss")}>Spawn Boss</button>
+                  </div>
+                  <p className="helper">Debug controls are intended for tuning balance and checking edge cases quickly.</p>
+                </>
+              )}
             </div>
-            <p className="helper">Debug controls are intended for tuning balance and checking edge cases quickly.</p>
           </section>
 
           <section className="panel-block">
